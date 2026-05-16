@@ -258,8 +258,6 @@ version = "0.0.1"
 dependencies = [
  "pulci-core",
  "pyo3",
- "serde",
- "serde_json",
  "tokio",
 ]
 

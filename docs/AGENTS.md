@@ -33,6 +33,10 @@ This returns the aggregated diagnostics. Shape:
     "checks_run": 4,
     "stale": false
   },
+  "tools": [
+    {"name": "ruff", "version": "0.7.4", "source": "local-venv", "path": ".venv/bin/ruff"},
+    {"name": "ty",   "version": "0.0.3", "source": "uvx-latest", "path": null}
+  ],
   "diagnostics": [
     {
       "tool": "ruff",
@@ -71,6 +75,21 @@ Machine-readable contracts for both the state file and the config:
 - [`schemas/state.v1.schema.json`](../schemas/state.v1.schema.json) — full schema for `.pulci/state.json`
 - [`schemas/pulci-toml.schema.json`](../schemas/pulci-toml.schema.json) — full schema for `pulci.toml`
 
+## Adapter version compatibility
+
+pulci exposes diagnostic codes from the underlying tools (e.g. `ruff/F401`).
+These codes are stable within the following version ranges:
+
+| Tool   | Supported range | Notes                          |
+|--------|-----------------|--------------------------------|
+| ruff   | 0.4.x – 0.11.x  | Code names stable across range |
+| ty     | 0.0.1 – 0.0.x   | Pre-stable; treat as best-effort |
+| pytest | 7.x – 8.x       | Exit codes and output stable   |
+
+If the resolved tool version falls outside these ranges, pulci continues to
+run but diagnostic codes may not match the documented values. Read the `tools`
+field in `state.json` to verify the active version before acting on codes.
+
 ## Agent-mode startup
 
 If you start the daemon yourself (rather than having the user start it), use
@@ -100,9 +119,10 @@ On unrecoverable error:
 `pulci status --json` is cheap: a single file read, no subprocess,
 typically <5ms and <2KB of output. Call it freely.
 
-`"stale"` is reserved for a future update and is always `false` in v0.0.1.
-It will become meaningful in a future version when the daemon can signal that
-a check pass is in-flight. For now, ignore it.
+`"stale": true` means the tool binaries changed between daemon runs (e.g. ruff
+was updated in the venv). The daemon detected the change and re-resolved tools.
+When `stale` is true, treat the current diagnostics as a full re-check, not an
+incremental one. It returns to `false` on the next check pass.
 
 **No initial scan:** pulci does not scan existing files on startup. `state.json`
 is only written after the first filesystem change event. If `pulci status`

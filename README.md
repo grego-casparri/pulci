@@ -74,7 +74,7 @@ pulci start --agent           # compact JSON events — use this in agent loops
 
 ```
 src/foo.py:12:1: error[ruff/F401] 'os' imported but unused
-1 error, 0 warnings (3 files checked)
+1 error, 0 warnings (3 files checked, 0.4s)
 ```
 
 **Query current state** (reads `.pulci/state.json`):

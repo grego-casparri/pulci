@@ -155,6 +155,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                     continue;
                 }
 
+                let t0 = Instant::now();
                 let (results, state) = py.allow_threads(|| {
                     let r = rt.block_on(orchestrator.run(&changed));
                     let s = build_state(&r, tool_infos.clone(), stale);
@@ -175,11 +176,13 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                         d.file.display(), d.line, d.col, d.severity, code_part, d.message
                     );
                 }
+                let elapsed = t0.elapsed().as_secs_f64();
                 println!(
-                    "{} errors, {} warnings ({} files checked)",
+                    "{} errors, {} warnings ({} files checked, {:.1}s)",
                     state.summary.errors,
                     state.summary.warnings,
                     changed.len(),
+                    elapsed,
                 );
 
                 if let Err(e) = write_state(&state_file, &state) {
