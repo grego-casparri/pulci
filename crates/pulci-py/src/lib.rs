@@ -164,16 +164,16 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                 stale = false; // only first run after tool change is stale
                 py.check_signals()?;
 
-                // Compiler-style output (both human and agent modes per FORMATS.md / D-007).
+                // Compiler-style output per FORMATS.md grammar:
+                // <file>:<line>:<col>: <severity>[<scope>/<code>] <message>
                 for d in &state.diagnostics {
                     let code_part = d.code.as_deref()
                         .map(|c| format!("[{}/{}]", d.tool, c))
                         .unwrap_or_else(|| format!("[{}]", d.tool));
                     println!(
-                        "{}:{}:{}: {} {}",
-                        d.file.display(), d.line, d.col, d.severity, code_part
+                        "{}:{}:{}: {} {} {}",
+                        d.file.display(), d.line, d.col, d.severity, code_part, d.message
                     );
-                    println!("  {}", d.message);
                 }
                 println!(
                     "{} errors, {} warnings ({} files checked)",

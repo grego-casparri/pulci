@@ -69,8 +69,7 @@ pulci start --agent           # compact JSON events — use this in agent loops
 **Agent mode output** — compiler-style diagnostics, one per line:
 
 ```
-src/foo.py:12:1: error[ruff/F401]
-  'os' imported but unused
+src/foo.py:12:1: error[ruff/F401] 'os' imported but unused
 1 error, 0 warnings (3 files checked)
 ```
 
