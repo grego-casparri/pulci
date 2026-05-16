@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use pyo3::prelude::*;
 use pulci_core::cache::FileCache;
 use pulci_core::config::load_config;
+use pulci_core::hooks::cargo::CargoAdapter;
 use pulci_core::hooks::pytest::PytestAdapter;
 use pulci_core::hooks::ruff::RuffAdapter;
 use pulci_core::hooks::ty::TyAdapter;
@@ -86,6 +87,12 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         tool_infos.push(resolved_to_info(&r));
         hook_list.push(Arc::new(PytestAdapter::new(&r)));
+    }
+    if config.hooks.clippy {
+        let r = pulci_core::resolver::resolve_tool("cargo", &project_root, None)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        tool_infos.push(resolved_to_info(&r));
+        hook_list.push(Arc::new(CargoAdapter::new(&r)));
     }
 
     // Determine stale: tools changed since last daemon run?

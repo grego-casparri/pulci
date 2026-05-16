@@ -15,6 +15,33 @@ uv run maturin develop --release
 uv run pulci --version   # should print 0.0.1
 ```
 
+## Commit hooks (prek)
+
+pulci uses [prek](https://github.com/astral-sh/prek) for local commit-time quality gates.
+
+Install prek once on your machine:
+
+```bash
+cargo install prek
+```
+
+Then activate the hooks in your clone:
+
+```bash
+prek install
+```
+
+This installs two hooks:
+- **pre-commit**: ruff check + ruff format + cargo clippy (~5 s)
+- **pre-push**: pytest + cargo test (~30 s)
+
+prek is optional on Windows (support is still maturing upstream). Run the checks manually instead:
+
+```bash
+uv run ruff check . && uv run ruff format --check . && cargo clippy --workspace -- -D warnings
+uv run pytest && cargo test --workspace
+```
+
 ## Run the test suite
 
 ```bash

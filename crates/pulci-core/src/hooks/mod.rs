@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+pub mod cargo;
 pub mod pytest;
 pub mod ruff;
 pub mod ty;

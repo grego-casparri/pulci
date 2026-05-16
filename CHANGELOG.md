@@ -7,6 +7,11 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `clippy` hook adapter: runs `cargo clippy --workspace --message-format=json -- -D warnings`
+  on any `.rs` file change. Enable with `clippy = true` in `[hooks]`. Default: `false`.
+- `.prek.yaml`: pre-commit stage (ruff check + ruff format + cargo clippy, ~5 s) and
+  pre-push stage (pytest + cargo test, ~30 s) — mirrors CI exactly at commit and push time.
+- `pulci.toml` at repo root: dogfood config enabling `ruff` and `clippy`, disabling `ty`/`pytest`.
 - 4-level tool resolution: pinned version (`pulci.toml [tools]`) → local venv
   (`.venv/bin/`) → system PATH → `uvx` fallback. Zero-config for new projects,
   full determinism for teams that want it.

@@ -22,6 +22,8 @@ pub struct HooksConfig {
     pub ty: bool,
     /// Run pytest on test files corresponding to changed source files. Default: false.
     pub pytest: bool,
+    /// Run `cargo clippy --workspace` on any Rust file change. Default: false.
+    pub clippy: bool,
 }
 
 impl Default for HooksConfig {
@@ -30,6 +32,7 @@ impl Default for HooksConfig {
             ruff: true,
             ty: true,
             pytest: false,
+            clippy: false,
         }
     }
 }
@@ -119,6 +122,23 @@ mod tests {
         let cfg = load_config(&dir).unwrap();
         assert_eq!(cfg.tools.ruff.as_deref(), Some("0.7.4"));
         assert!(cfg.tools.ty.is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn clippy_defaults_to_false() {
+        let dir = write_toml("");
+        let cfg = load_config(&dir).unwrap();
+        assert!(!cfg.hooks.clippy);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn clippy_enabled_via_toml() {
+        let dir = write_toml("[hooks]\nclipy = false\nruff = true\n");
+        let cfg = load_config(&dir).unwrap();
+        assert!(cfg.hooks.ruff);
+        assert!(!cfg.hooks.clippy);
         std::fs::remove_dir_all(&dir).ok();
     }
 

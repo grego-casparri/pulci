@@ -1,9 +1,5 @@
-# pulci watches itself — Day 5 dogfooding.
-#
-# ty is disabled: not installed in this dev environment yet.
-# pytest is enabled: pulci has its own test suite.
-
 [hooks]
-ruff = true
-ty = false
-pytest = true
+ruff   = true
+ty     = false
+pytest = false
+clippy = true
