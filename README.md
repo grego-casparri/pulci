@@ -150,17 +150,6 @@ Schema version is `1` and will be bumped on breaking changes.
 - Config schema: [`schemas/pulci-toml.schema.json`](schemas/pulci-toml.schema.json)
 - Human documentation: [`docs/AGENTS.md`](docs/AGENTS.md)
 
-## Roadmap
-
-- [x] File watcher with debounce and ignore filters
-- [x] ruff, ty, and pytest hook adapters with parallel execution
-- [x] Aggregated JSON state, atomic write, hash-based cache
-- [x] `pulci.toml` config, `--agent` output mode
-- [x] Benchmark suite
-- [ ] PyPI wheels (v0.1)
-- [ ] MCP server interface (v0.2)
-- [ ] mypy / basedpyright / bandit adapters (v0.2)
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
