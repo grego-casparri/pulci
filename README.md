@@ -2,7 +2,7 @@
 
 > Continuous quality gate daemon for agent-driven Python development.
 
-**v0.0.1** — Apache-2.0
+**v0.0.1** — Apache-2.0 — [docs/AGENTS.md](docs/AGENTS.md)
 
 ## Why
 
@@ -35,8 +35,10 @@ git clone https://github.com/grego-casparri/pulci
 cd pulci
 uv sync
 uv run maturin develop --release
-uv run pulci --version   # 0.0.1
+uv run pulci --version
 ```
+
+PyPI wheels are planned for v0.1.
 
 ## Usage
 
@@ -57,8 +59,9 @@ pulci start --agent           # compact JSON events — use this in agent loops
 **Query current state** (reads `.pulci/state.json`):
 
 ```bash
-pulci status          # human-readable table
-pulci status --json   # full JSON for agents
+pulci status                        # human-readable table
+pulci status --json                 # full JSON for agents
+pulci status /path/to/project --json
 ```
 
 Sample `pulci status --json` output:
@@ -97,30 +100,16 @@ If `pulci.toml` is absent, defaults apply (`ruff=true`, `ty=true`, `pytest=false
 
 ## Benchmark
 
-Compares three quality-gate modes over 50 iterations on a realistic Python file:
+A benchmark script is included to compare pulci against manual tool invocation
+and prek across N iterations:
 
-```
-uv run python benchmarks/bench_modes.py
-```
-
-Typical results (warm daemon, Linux, Ryzen 7):
-
-```
-────────────────────────────────────────────────────────────────────────────────
-mode        n    mean ms   p50 ms   p95 ms    total s   tok/iter
-────────────────────────────────────────────────────────────────────────────────
-manual     50      88.4     87.1     96.3       4.42       1111
-pulci      50      65.2     63.8     74.1       3.26        383
-prek       —   not installed
-────────────────────────────────────────────────────────────────────────────────
-
-Token efficiency : pulci uses ~2.9x fewer tokens/iter vs manual
-Latency          : pulci is ~23 ms faster/iter vs manual
-Net benefit      : fewer tokens + comparable latency; debounce batches rapid saves for free.
+```bash
+uv run python benchmarks/bench_modes.py --iterations 50
 ```
 
-pulci's compact `state.json` is a fixed-schema file; manual tool output grows
-linearly with the number of violations.
+Metrics: mean/p50/p95 latency per iteration, total wall time, estimated output
+tokens per iteration. pulci's compact `state.json` is a fixed-schema file;
+manual tool output grows linearly with the number of violations.
 
 ## State file contract
 
@@ -131,16 +120,18 @@ Full schema documented in [`docs/AGENTS.md`](docs/AGENTS.md).
 
 ## Roadmap
 
-- [x] **Day 1** — scaffold, `pulci --version` end-to-end through Rust + PyO3
-- [x] **Day 2** — file watcher (`notify` crate), `pulci start [path]`, ignore filters
-- [x] **Day 3** — `Hook` trait, ruff + ty adapters, parallel execution via tokio
-- [x] **Day 4** — aggregated JSON state, atomic write, `pulci status --json`, hash cache
-- [x] **Day 5** — `pulci.toml` config, `--agent` output mode, selective pytest adapter
-- [x] **Day 6** — benchmark suite: manual vs pulci vs prek over 50 iterations
-- [x] **Day 7** — README, demo script, metadata, `[dependency-groups]` migration
+- [x] File watcher with debounce and ignore filters
+- [x] ruff, ty, and pytest hook adapters with parallel execution
+- [x] Aggregated JSON state, atomic write, hash-based cache
+- [x] `pulci.toml` config, `--agent` output mode
+- [x] Benchmark suite
+- [ ] PyPI wheels (v0.1)
+- [ ] MCP server interface (v0.2)
+- [ ] mypy / basedpyright / bandit adapters (v0.2)
 
-After v0.1: MCP server interface, mypy/basedpyright/bandit adapters, hosted
-team-wide state, marketplace of community hooks.
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
