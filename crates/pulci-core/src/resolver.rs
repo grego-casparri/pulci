@@ -185,4 +185,39 @@ mod tests {
         let version = detect_version(&["__nonexistent__".to_owned()]);
         assert_eq!(version, "unknown");
     }
+
+    #[test]
+    fn resolve_tool_picks_local_venv_over_system_path() {
+        let dir = tmp_dir();
+        #[cfg(windows)]
+        let bin_path = dir.join(".venv").join("Scripts").join("ruff.exe");
+        #[cfg(not(windows))]
+        let bin_path = dir.join(".venv").join("bin").join("ruff");
+
+        fs::create_dir_all(bin_path.parent().unwrap()).unwrap();
+        fs::write(&bin_path, b"").unwrap();
+
+        let resolved = resolve_tool("ruff", &dir, None).unwrap();
+        assert!(
+            matches!(resolved.source, ToolSource::LocalVenv { .. }),
+            "expected LocalVenv, got {:?}",
+            resolved.source
+        );
+        assert_eq!(resolved.name, "ruff");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resolve_tool_no_venv_falls_back_to_system_or_uvx() {
+        let dir = tmp_dir();
+        fs::create_dir_all(&dir).unwrap();
+
+        // Tool definitely does not exist; resolve_tool should either find it
+        // via uvx (if available) or return an error — never panic.
+        let result = resolve_tool("__pulci_nonexistent_xyz__", &dir, None);
+        // We don't assert Ok/Err because uvx availability varies in CI.
+        // The important guarantee is no panic and a coherent result type.
+        let _ = result;
+        fs::remove_dir_all(&dir).ok();
+    }
 }

@@ -112,6 +112,19 @@ per hook — hooks are synchronous subprocesses, so blocking is correct.
 `py.allow_threads(|| ...)` so that Ctrl-C (SIGINT) is delivered by Python's
 signal machinery even when tools are running.
 
+**4-level tool resolver (`crates/pulci-core/src/resolver.rs`):** Each tool is
+resolved at daemon startup using a fixed precedence chain:
+1. Pinned version in `pulci.toml [tools]` → `uvx name@version`
+2. Binary in `.venv/bin/` of the watched project root
+3. Binary in system `PATH`
+4. `uvx name` (latest) as a zero-config fallback
+
+The resolver runs `name --version` after locating the binary to record the
+exact version in `state.json`. This version is re-checked on every daemon
+cycle; if it changes (e.g. the user ran `pip install --upgrade ruff`), the
+`stale` flag in the next `state.json` write is set to `true` so consumers
+know a tool upgrade occurred mid-session.
+
 ## Out of scope (deliberately)
 
 These are real problems, but not pulci's:

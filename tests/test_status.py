@@ -6,9 +6,14 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 
 from pulci.cli import app
 from typer.testing import CliRunner
+
+# Compiler-style diagnostic line per FORMATS.md:
+# <file>:<line>:<col>: <severity>[<tool>/<code>] <message>
+_DIAGNOSTIC_RE = re.compile(r"[\w./][\w./-]*:\d+:\d+: \w+\[\w+/\w+\] .+")
 
 runner = CliRunner()
 
@@ -51,6 +56,10 @@ def test_status_human_output() -> None:
     assert "1" in result.output
     assert "F401" in result.output
     assert "src/main.py" in result.output
+    # Verify compiler-style format: file:line:col: severity[tool/code] message
+    assert _DIAGNOSTIC_RE.search(result.output), (
+        f"diagnostic line does not match compiler format, got:\n{result.output}"
+    )
 
 
 def test_status_json_output_is_valid_json() -> None:

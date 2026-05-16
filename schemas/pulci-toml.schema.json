@@ -25,6 +25,11 @@
           "type": "boolean",
           "default": false,
           "description": "Run pytest on tests/test_<changed>.py for each changed source file."
+        },
+        "clippy": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run cargo clippy on the workspace (intended for Rust projects using pulci on itself)."
         }
       }
     },
