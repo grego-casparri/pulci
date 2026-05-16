@@ -10,7 +10,7 @@ readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 authors = [{ name = "Grego Casparri", email = "gregocasparri@gmail.com" }]
-keywords = ["quality-gates", "linting", "agent", "ai", "daemon", "rust"]
+keywords = ["quality-gates", "linting", "agent", "ai", "daemon", "rust", "ruff", "code-quality", "file-watcher", "llm"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",
@@ -31,6 +31,7 @@ pulci = "pulci.cli:app"
 Homepage = "https://github.com/grego-casparri/pulci"
 Repository = "https://github.com/grego-casparri/pulci"
 Issues = "https://github.com/grego-casparri/pulci/issues"
+Documentation = "https://github.com/grego-casparri/pulci/blob/main/docs/AGENTS.md"
 
 [tool.maturin]
 manifest-path = "crates/pulci-py/Cargo.toml"

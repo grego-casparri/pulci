@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  # id-token: write is granted at the publish job level only (OIDC trusted publishing)
 
 jobs:
   build-wheels:
@@ -15,13 +16,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            manylinux: auto
+          - os: ubuntu-latest
+            manylinux: musllinux_1_2
+          - os: macos-latest
+            target: universal2-apple-darwin
+          - os: windows-latest
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
 
       - name: Build wheels
@@ -29,29 +35,79 @@ jobs:
         with:
           command: build
           args: --release --out dist
-          manylinux: auto
+          manylinux: ${{ matrix.manylinux || '' }}
+          target: ${{ matrix.target || '' }}
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-${{ matrix.os }}-${{ matrix.manylinux || matrix.target || 'native' }}
           path: dist
+
+  build-sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+  test-wheels:
+    name: Smoke test wheels (${{ matrix.os }})
+    needs: build-wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-${{ matrix.os }}-*
+          merge-multiple: true
+          path: dist
+      - name: Install from wheel
+        run: pip install --find-links dist --no-index pulci
+      - name: Smoke test
+        run: |
+          python -c "import pulci._native; print('native module ok')"
+          pulci --version
 
   publish:
     name: Publish to PyPI
-    needs: build-wheels
+    needs: [build-wheels, build-sdist, test-wheels]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      id-token: write
+      id-token: write  # required for OIDC trusted publishing
 
     steps:
-      - name: Download wheels
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: wheels-*
           merge-multiple: true
           path: dist
+
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: Check distributions
+        run: |
+          pip install twine
+          twine check dist/*
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

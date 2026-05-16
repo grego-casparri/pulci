@@ -16,8 +16,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.12"
       - run: uvx ruff check .
       - run: uvx ruff format --check .
+
+  rust-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Rust tests
+        run: cargo test --workspace
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings
 
   build-and-test:
     runs-on: ${{ matrix.os }}
@@ -40,6 +55,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Sync Python env
+        run: uv sync --frozen
       - name: Build native extension
         run: uv run maturin develop --release
 

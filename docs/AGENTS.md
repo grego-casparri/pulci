@@ -4,6 +4,8 @@ This document is for AI coding agents (Claude Code, Cursor, Codex,
 custom harnesses). If you're a human, the [README](../README.md)
 is what you want.
 
+> This document describes the pulci contract as of **v0.0.1** (schema_version 1).
+
 ## The contract
 
 pulci runs as a daemon in the project root. It watches the filesystem
@@ -44,6 +46,8 @@ This returns the aggregated diagnostics. Shape:
   ]
 }
 ```
+
+Severity values: `"error"`, `"warning"`, `"info"`. Most adapters emit only `"error"` and `"warning"`. Handle `"info"` gracefully (do not treat as an error).
 
 ## Workflow
 
@@ -92,6 +96,11 @@ typically <5ms and <2KB of output. Call it freely.
 `"stale"` is reserved for a future update and is always `false` in v0.0.1.
 It will become meaningful in a future version when the daemon can signal that
 a check pass is in-flight. For now, ignore it.
+
+**No initial scan:** pulci does not scan existing files on startup. `state.json`
+is only written after the first filesystem change event. If `pulci status`
+returns "No state available", make any small change to a watched file to
+trigger the first check.
 
 ## What pulci is not
 

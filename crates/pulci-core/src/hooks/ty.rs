@@ -50,23 +50,22 @@ pub(crate) fn parse_ty_output(text: &str) -> Vec<Diagnostic> {
                 .map(str::trim)
                 .and_then(parse_location);
 
-            let has_loc = loc.is_some();
-            let (file, ln, col) = loc.unwrap_or((PathBuf::from(""), 0, 0));
-
-            diagnostics.push(Diagnostic {
-                tool: "ty".into(),
-                file,
-                line: ln,
-                col,
-                severity,
-                code,
-                message,
-            });
-
-            if has_loc {
+            if let Some((file, ln, col)) = loc {
+                diagnostics.push(Diagnostic {
+                    tool: "ty".into(),
+                    file,
+                    line: ln,
+                    col,
+                    severity,
+                    code,
+                    message,
+                });
                 i += 2; // consumed the `-->` line
                 continue;
             }
+            // No location line found — skip this entry (e.g. info-only lines like
+            // `info: rule 'X' is enabled by default`). Emitting a ghost diagnostic
+            // with file="" would confuse agents parsing state.json.
         }
 
         i += 1;
@@ -146,9 +145,21 @@ warning[possibly-unbound]: `x` may be unbound
     }
 
     #[test]
-    fn parse_no_location() {
+    fn parse_no_location_is_dropped() {
+        // A diagnostic line with no following `-->` location is a ghost entry and
+        // must not appear in the output.
         let diags = parse_ty_output("error[foo]: something went wrong\n");
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn info_line_without_location_is_ignored() {
+        let output = "info: rule 'division-by-zero' is enabled by default\n\
+                      error[division-by-zero]: cannot divide by zero\n  \
+                      --> src/foo.py:10:5\n";
+        let diags = parse_ty_output(output);
+        // Only the error with a location should be emitted
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].line, 0);
+        assert_eq!(diags[0].file, PathBuf::from("src/foo.py"));
     }
 }

@@ -14,7 +14,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pulci-core = { path = "../pulci-core" }
-pyo3 = { version = "0.22", features = ["extension-module"] }
+pyo3 = { version = "0.22" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

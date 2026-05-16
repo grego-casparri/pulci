@@ -57,7 +57,7 @@ def test_status_json_output_is_valid_json() -> None:
     with runner.isolated_filesystem() as tmp:
         write_state(pathlib.Path(tmp), MINIMAL_STATE)
         result = runner.invoke(app, ["status", "--json"])
-    assert result.exit_code == 0
+    assert result.exit_code == 1  # errors > 0 → exit 1, even in --json mode
     parsed = json.loads(result.output)
     assert parsed["schema_version"] == 1
     assert parsed["summary"]["errors"] == 1
@@ -67,6 +67,7 @@ def test_status_json_schema_fields_present() -> None:
     with runner.isolated_filesystem() as tmp:
         write_state(pathlib.Path(tmp), MINIMAL_STATE)
         result = runner.invoke(app, ["status", "--json"])
+    assert result.exit_code == 1  # errors > 0
     parsed = json.loads(result.output)
     assert "schema_version" in parsed
     assert "timestamp" in parsed

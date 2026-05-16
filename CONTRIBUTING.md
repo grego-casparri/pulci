@@ -18,9 +18,9 @@ uv run pulci --version   # should print 0.0.1
 ## Run the test suite
 
 ```bash
+source $HOME/.cargo/env   # ensure Rust is in PATH (skip if rustup is already initialized in your shell)
 uv run pytest             # Python tests
-source $HOME/.cargo/env
-cargo test                # Rust unit tests
+cargo test                # Rust tests
 cargo clippy -- -D warnings   # must be clean
 uv run ruff check .       # must be clean
 uv run ruff format --check .

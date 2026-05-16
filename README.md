@@ -2,6 +2,11 @@
 
 > Continuous quality gate daemon for agent-driven Python development.
 
+[![CI](https://github.com/grego-casparri/pulci/actions/workflows/ci.yml/badge.svg)](https://github.com/grego-casparri/pulci/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
+
 **v0.0.1** — Apache-2.0 — [docs/AGENTS.md](docs/AGENTS.md)
 
 ## Why
@@ -28,7 +33,15 @@ structured JSON. Agents stop re-invoking tools; they query state.
 
 pulci does **not** replace any of these. It fills the empty quadrant.
 
+## For AI agents
+
+If you are an AI coding agent, start here: **[docs/AGENTS.md](docs/AGENTS.md)**
+
+The short version: run `pulci start --agent` once, then call `pulci status --json` after each edit instead of invoking ruff/ty/pytest directly.
+
 ## Install
+
+> **Prerequisites:** [Rust stable](https://rustup.rs/) and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 git clone https://github.com/grego-casparri/pulci
@@ -55,6 +68,8 @@ pulci start --agent           # compact JSON events — use this in agent loops
 ```json
 {"event":"check","files":2,"errors":3,"warnings":1,"checks_run":2,"stale":false}
 ```
+
+(`stale` is always `false` in v0.0.1 — reserved for a future release)
 
 **Query current state** (reads `.pulci/state.json`):
 

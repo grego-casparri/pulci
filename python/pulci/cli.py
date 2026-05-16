@@ -107,11 +107,13 @@ def status(
             typer.echo(f"State file is corrupted: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
+    summary = state.get("summary", {})
+
     if json_output:
         typer.echo(raw)
+        if summary.get("errors", 0) > 0:
+            raise typer.Exit(code=1)
         return
-
-    summary = state.get("summary", {})
 
     typer.echo(f"  errors    {summary.get('errors', 0)}")
     typer.echo(f"  warnings  {summary.get('warnings', 0)}")
