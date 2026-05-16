@@ -93,7 +93,7 @@ jobs:
           merge-multiple: true
           path: dist
       - name: Install from wheel
-        run: pip install --find-links dist --no-index pulci
+        run: pip install --find-links dist pulci
       - name: Smoke test
         run: |
           python -c "import pulci._native; print('native module ok')"
