@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/grego-casparri/pulci/main/schemas/pulci-toml.schema.json",
+  "title": "pulci.toml",
+  "description": "Schema for pulci.toml project configuration. All sections are optional.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "hooks": {
+      "type": "object",
+      "description": "Controls which quality-gate adapters are active.",
+      "additionalProperties": false,
+      "properties": {
+        "ruff": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run ruff check on changed .py files."
+        },
+        "ty": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run ty check on changed .py files."
+        },
+        "pytest": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run pytest on tests/test_<changed>.py for each changed source file."
+        }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "description": "Pin exact tool versions. Absent fields are auto-resolved via local-venv → PATH → uvx.",
+      "additionalProperties": false,
+      "properties": {
+        "ruff": {
+          "type": "string",
+          "description": "Pin ruff to this version, e.g. \"0.7.4\". Uses uvx ruff@<version>."
+        },
+        "ty": {
+          "type": "string",
+          "description": "Pin ty to this version, e.g. \"0.0.3\". Uses uvx ty@<version>."
+        },
+        "pytest": {
+          "type": "string",
+          "description": "Pin pytest to this version, e.g. \"8.3.0\". Uses uvx pytest@<version>."
+        }
+      }
+    }
+  }
+}

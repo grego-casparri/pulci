@@ -142,7 +142,9 @@ manual tool output grows linearly with the number of violations.
 `.pulci/state.json` is the primary contract between pulci and consumers.
 Schema version is `1` and will be bumped on breaking changes.
 
-Full schema documented in [`docs/AGENTS.md`](docs/AGENTS.md).
+- Full schema: [`schemas/state.v1.schema.json`](schemas/state.v1.schema.json)
+- Config schema: [`schemas/pulci-toml.schema.json`](schemas/pulci-toml.schema.json)
+- Human documentation: [`docs/AGENTS.md`](docs/AGENTS.md)
 
 ## Roadmap
 

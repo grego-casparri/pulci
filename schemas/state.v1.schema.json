@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/grego-casparri/pulci/main/schemas/state.v1.schema.json",
+  "title": "pulci state",
+  "description": "Schema for .pulci/state.json written by pulci start.",
+  "type": "object",
+  "required": ["schema_version", "timestamp", "summary", "diagnostics", "tools"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. Will be bumped on breaking changes."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of the last check pass."
+    },
+    "summary": {
+      "type": "object",
+      "required": ["errors", "warnings", "checks_run", "stale"],
+      "additionalProperties": false,
+      "properties": {
+        "errors":     { "type": "integer", "minimum": 0 },
+        "warnings":   { "type": "integer", "minimum": 0 },
+        "checks_run": { "type": "integer", "minimum": 0, "description": "Number of hook adapters that ran." },
+        "stale":      { "type": "boolean", "description": "True when resolved tools changed since last daemon start." }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tool", "file", "line", "col", "severity", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "tool":     { "type": "string", "description": "Adapter name: ruff, ty, pytest, etc." },
+          "file":     { "type": "string", "description": "Relative path to the file containing the diagnostic." },
+          "line":     { "type": "integer", "minimum": 0 },
+          "col":      { "type": "integer", "minimum": 0 },
+          "severity": { "type": "string", "enum": ["error", "warning", "info"] },
+          "code":     { "type": ["string", "null"], "description": "Tool-specific rule code, e.g. F401." },
+          "message":  { "type": "string" }
+        }
+      }
+    },
+    "tools": {
+      "type": "array",
+      "description": "Resolved tool metadata for each enabled adapter.",
+      "items": {
+        "type": "object",
+        "required": ["name", "version", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "name":    { "type": "string" },
+          "version": { "type": "string" },
+          "source":  {
+            "type": "string",
+            "enum": ["pinned", "local-venv", "system-path", "uvx-latest"],
+            "description": "How the tool was resolved."
+          },
+          "path":    { "type": ["string", "null"], "description": "Absolute path if source is local-venv or system-path." }
+        }
+      }
+    }
+  }
+}

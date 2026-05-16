@@ -7,6 +7,10 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- JSON Schema for `.pulci/state.json` (`schemas/state.v1.schema.json`) and `pulci.toml`
+  (`schemas/pulci-toml.schema.json`) — machine-readable contracts for state consumers and
+  config authors. Schema links added to `README.md` and `docs/AGENTS.md`.
+- `demo/pulci.tape` — reproducible vhs script for the demo GIF. Generate with `vhs demo/pulci.tape`.
 - `.prek.yaml`: pre-commit stage (ruff check + ruff format + cargo clippy, ~5 s) and
   pre-push stage (pytest + cargo test, ~30 s) — mirrors CI exactly at commit and push time.
 - 4-level tool resolution: pinned version (`pulci.toml [tools]`) → local venv

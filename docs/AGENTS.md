@@ -64,6 +64,13 @@ pulci is active. You'll pay cold start each time and the daemon's
 cache will be redundant. The whole point is that pulci already ran
 them in the background while you were thinking.
 
+## Schemas
+
+Machine-readable contracts for both the state file and the config:
+
+- [`schemas/state.v1.schema.json`](../schemas/state.v1.schema.json) — full schema for `.pulci/state.json`
+- [`schemas/pulci-toml.schema.json`](../schemas/pulci-toml.schema.json) — full schema for `pulci.toml`
+
 ## Agent-mode startup
 
 If you start the daemon yourself (rather than having the user start it), use
