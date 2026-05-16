@@ -1,0 +1,28 @@
+[workspace]
+members = [
+    "crates/pulci-core",
+    "crates/pulci-py",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Grego Casparri <gregocasparri@gmail.com>"]
+repository = "https://github.com/gregocasparri/pulci"
+homepage = "https://github.com/gregocasparri/pulci"
+description = "Continuous quality gate daemon for agent-driven Python development."
+
+[workspace.dependencies]
+notify = "6"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

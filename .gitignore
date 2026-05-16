@@ -1,0 +1,44 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Maturin / native build artifacts
+*.so
+*.pyd
+*.dll
+*.dylib
+wheels/
+
+# pulci's own runtime state directory
+.pulci/
+
+# Benchmark results (generated, not committed)
+benchmarks/results.json
+
+# Secrets / environment
+.env
+.env.*
+*.key
+*.pem
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+*:Zone.Identifier

@@ -1,0 +1,20 @@
+[package]
+name = "pulci-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "PyO3 bindings that expose pulci-core to Python."
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pulci-core = { path = "../pulci-core" }
+pyo3 = { version = "0.22", features = ["extension-module"] }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
