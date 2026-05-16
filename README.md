@@ -33,6 +33,10 @@ structured JSON. Agents stop re-invoking tools; they query state.
 
 pulci does **not** replace any of these. It fills the empty quadrant.
 
+## Demo
+
+![pulci watching a project for changes](demo/pulci.gif)
+
 ## For AI agents
 
 If you are an AI coding agent, start here: **[docs/AGENTS.md](docs/AGENTS.md)**
