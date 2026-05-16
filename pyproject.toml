@@ -39,6 +39,9 @@ python-source = "python"
 module-name = "pulci._native"
 features = ["pyo3/extension-module"]
 strip = true
+include = [
+    { path = "LICENSE", format = ["sdist"] },
+]
 
 [tool.ruff]
 line-length = 100
