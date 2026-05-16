@@ -8,7 +8,7 @@
 ## Build from source
 
 ```bash
-git clone https://github.com/gregocasparri/pulci
+git clone https://github.com/grego-casparri/pulci
 cd pulci
 uv sync
 uv run maturin develop --release

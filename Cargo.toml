@@ -10,8 +10,8 @@ version = "0.0.1"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Grego Casparri <gregocasparri@gmail.com>"]
-repository = "https://github.com/gregocasparri/pulci"
-homepage = "https://github.com/gregocasparri/pulci"
+repository = "https://github.com/grego-casparri/pulci"
+homepage = "https://github.com/grego-casparri/pulci"
 description = "Continuous quality gate daemon for agent-driven Python development."
 
 [workspace.dependencies]

@@ -28,9 +28,9 @@ dependencies = [
 pulci = "pulci.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/gregocasparri/pulci"
-Repository = "https://github.com/gregocasparri/pulci"
-Issues = "https://github.com/gregocasparri/pulci/issues"
+Homepage = "https://github.com/grego-casparri/pulci"
+Repository = "https://github.com/grego-casparri/pulci"
+Issues = "https://github.com/grego-casparri/pulci/issues"
 
 [tool.maturin]
 manifest-path = "crates/pulci-py/Cargo.toml"
