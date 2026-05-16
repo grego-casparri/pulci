@@ -42,7 +42,8 @@ def test_start_detects_file_creation() -> None:
         proc.terminate()
         stdout, _ = proc.communicate(timeout=5)
 
-        assert "checking" in stdout
+        # The new output format emits a summary line like "0 errors, 0 warnings (N files checked)"
+        assert "errors" in stdout
 
 
 def test_start_ignores_pycache() -> None:
@@ -67,9 +68,11 @@ def test_start_ignores_pycache() -> None:
         assert "__pycache__" not in stdout
 
 
-def test_start_agent_mode_emits_valid_json() -> None:
-    import json as _json
-
+def test_start_agent_mode_emits_compiler_style_summary() -> None:
+    """
+    --agent mode now emits compiler-style diagnostics (same as human mode),
+    not JSON events. Verify the summary line is present after a check.
+    """
     import pytest
 
     if not pathlib.Path(PULCI_BIN).exists():
@@ -94,12 +97,6 @@ def test_start_agent_mode_emits_valid_json() -> None:
         proc.terminate()
         stdout, _ = proc.communicate(timeout=5)
 
-    json_lines = [ln.strip() for ln in stdout.splitlines() if ln.strip().startswith("{")]
-    assert json_lines, "expected at least one JSON event line from --agent mode"
-
-    for line in json_lines:
-        event = _json.loads(line)
-        assert "event" in event
-        if event["event"] == "check":
-            for field in ("errors", "warnings", "checks_run", "stale"):
-                assert field in event, f"missing field {field!r} in check event"
+    # Expect the compiler-style summary line: "N errors, N warnings (N files checked)"
+    assert "errors" in stdout, f"expected summary line in stdout, got: {stdout!r}"
+    assert "warnings" in stdout, f"expected summary line in stdout, got: {stdout!r}"

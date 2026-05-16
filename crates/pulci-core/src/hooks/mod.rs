@@ -15,6 +15,16 @@ pub enum Severity {
     Info,
 }
 
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Severity::Error => write!(f, "error"),
+            Severity::Warning => write!(f, "warning"),
+            Severity::Info => write!(f, "info"),
+        }
+    }
+}
+
 /// A single diagnostic emitted by a quality-gate tool.
 ///
 /// This is the unified type that every hook adapter must produce.

@@ -22,6 +22,7 @@ pub mod cache;
 pub mod config;
 pub mod hooks;
 pub mod orchestrator;
+pub mod resolver;
 pub mod state;
 pub mod watcher;
 

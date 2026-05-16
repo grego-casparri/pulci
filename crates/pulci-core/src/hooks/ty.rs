@@ -1,10 +1,17 @@
-use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::process::Command;
 
 use super::{Diagnostic, Hook, Severity};
 
-pub struct TyAdapter;
+pub struct TyAdapter {
+    invocation: Vec<String>,
+}
+
+impl TyAdapter {
+    pub fn new(resolved: &crate::resolver::ResolvedTool) -> Self {
+        Self { invocation: resolved.invocation.clone() }
+    }
+}
 
 impl Hook for TyAdapter {
     fn name(&self) -> &'static str {
@@ -12,13 +19,14 @@ impl Hook for TyAdapter {
     }
 
     fn run(&self, files: &[PathBuf]) -> anyhow::Result<Vec<Diagnostic>> {
-        let result = Command::new("ty").arg("check").args(files).output();
-
-        let output = match result {
-            Ok(o) => o,
-            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(vec![]),
-            Err(e) => return Err(e.into()),
-        };
+        let (bin, prefix_args) = self.invocation
+            .split_first()
+            .expect("invocation is always non-empty");
+        let output = Command::new(bin)
+            .args(prefix_args)
+            .arg("check")
+            .args(files)
+            .output()?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         Ok(parse_ty_output(&stdout))

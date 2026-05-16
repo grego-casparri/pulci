@@ -62,8 +62,6 @@ def start(
     Reads hook configuration from pulci.toml in the project root if present.
     Press Ctrl-C to stop.
     """
-    if not agent:
-        typer.echo(f"Watching {path} — press Ctrl-C to stop.")
     try:
         _native.start(path, agent)
     except KeyboardInterrupt:
@@ -115,6 +113,17 @@ def status(
             raise typer.Exit(code=1)
         return
 
+    tools = state.get("tools", [])
+    if tools:
+        typer.echo("Tools:")
+        for t in tools:
+            name = t.get("name", "")
+            version = t.get("version", "unknown")
+            source = t.get("source", "")
+            path = t.get("path") or ""
+            typer.echo(f"  {name:<8} {version:<8} {source:<12} {path}")
+        typer.echo("")
+
     typer.echo(f"  errors    {summary.get('errors', 0)}")
     typer.echo(f"  warnings  {summary.get('warnings', 0)}")
     typer.echo(f"  checks    {summary.get('checks_run', 0)}")
@@ -132,8 +141,8 @@ def status(
             sev = d.get("severity", "error")
             msg = d.get("message", "")
             tool = d.get("tool", "")
-            code_str = f"[{code}] " if code else ""
-            typer.echo(f"  {file_}:{line}:{col} {code_str}{sev}: {msg} ({tool})")
+            code_part = f"[{tool}/{code}]" if code else f"[{tool}]"
+            typer.echo(f"  {file_}:{line}:{col}: {sev}{code_part} {msg}")
 
     if summary.get("errors", 0) > 0:
         raise typer.Exit(code=1)

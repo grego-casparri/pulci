@@ -5,7 +5,15 @@ use serde::Deserialize;
 
 use super::{Diagnostic, Hook, Severity};
 
-pub struct RuffAdapter;
+pub struct RuffAdapter {
+    invocation: Vec<String>,
+}
+
+impl RuffAdapter {
+    pub fn new(resolved: &crate::resolver::ResolvedTool) -> Self {
+        Self { invocation: resolved.invocation.clone() }
+    }
+}
 
 // Serde types matching `ruff check --output-format=json`
 #[derive(Deserialize)]
@@ -28,12 +36,15 @@ impl Hook for RuffAdapter {
     }
 
     fn run(&self, files: &[PathBuf]) -> anyhow::Result<Vec<Diagnostic>> {
-        let output = Command::new("ruff")
+        let (bin, prefix_args) = self.invocation
+            .split_first()
+            .expect("invocation is always non-empty");
+        let output = Command::new(bin)
+            .args(prefix_args)
             .args(["check", "--output-format=json"])
             .args(files)
             .output()?;
 
-        // exit 0 = clean, exit 1 = violations found, exit 2+ = tool error
         if output.status.code().is_some_and(|c| c > 1) {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("ruff failed (exit {}): {stderr}", output.status);

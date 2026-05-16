@@ -1,11 +1,17 @@
-use std::collections::HashSet;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::{Diagnostic, Hook, Severity};
 
-pub struct PytestAdapter;
+pub struct PytestAdapter {
+    invocation: Vec<String>,
+}
+
+impl PytestAdapter {
+    pub fn new(resolved: &crate::resolver::ResolvedTool) -> Self {
+        Self { invocation: resolved.invocation.clone() }
+    }
+}
 
 impl Hook for PytestAdapter {
     fn name(&self) -> &'static str {
@@ -16,7 +22,7 @@ impl Hook for PytestAdapter {
         let test_files: Vec<PathBuf> = files
             .iter()
             .filter_map(|f| find_test_file(f))
-            .collect::<HashSet<_>>()
+            .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .filter(|p| p.exists())
             .collect();
@@ -25,16 +31,14 @@ impl Hook for PytestAdapter {
             return Ok(vec![]);
         }
 
-        let result = Command::new("pytest")
+        let (bin, prefix_args) = self.invocation
+            .split_first()
+            .expect("invocation is always non-empty");
+        let output = Command::new(bin)
+            .args(prefix_args)
             .args(["--tb=no", "-q", "--no-header"])
             .args(&test_files)
-            .output();
-
-        let output = match result {
-            Ok(o) => o,
-            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(vec![]),
-            Err(e) => return Err(e.into()),
-        };
+            .output()?;
 
         Ok(parse_pytest_output(&output.stdout))
     }

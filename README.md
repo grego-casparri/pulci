@@ -29,7 +29,7 @@ structured JSON. Agents stop re-invoking tools; they query state.
 | prek          | Commit time (fast)  | Human terminal        | Humans      |
 | MegaLinter    | CI time             | Reports               | CI/CD       |
 | pytest-watch  | File change         | Human terminal        | Humans      |
-| **pulci**     | **Iteration time**  | **Structured JSON**   | **Agents**  |
+| **pulci**     | **Iteration time**  | **Compiler-style + JSON** | **Agents**  |
 
 pulci does **not** replace any of these. It fills the empty quadrant.
 
@@ -66,13 +66,13 @@ pulci start /path/to/project  # explicit root
 pulci start --agent           # compact JSON events — use this in agent loops
 ```
 
-**Agent mode output** (one JSON line per check):
+**Agent mode output** — compiler-style diagnostics, one per line:
 
-```json
-{"event":"check","files":2,"errors":3,"warnings":1,"checks_run":2,"stale":false}
 ```
-
-(`stale` is always `false` in v0.0.1 — reserved for a future release)
+src/foo.py:12:1: error[ruff/F401]
+  'os' imported but unused
+1 error, 0 warnings (3 files checked)
+```
 
 **Query current state** (reads `.pulci/state.json`):
 
@@ -88,7 +88,11 @@ Sample `pulci status --json` output:
 {
   "schema_version": 1,
   "timestamp": "2026-05-16T12:00:00Z",
-  "summary": { "errors": 2, "warnings": 1, "checks_run": 2, "stale": false },
+  "summary": { "errors": 2, "warnings": 1, "checks_run": 3, "stale": false },
+  "tools": [
+    {"name": "ruff", "version": "0.7.4", "source": "local-venv", "path": ".venv/bin/ruff"},
+    {"name": "ty",   "version": "0.0.3", "source": "uvx-latest", "path": null}
+  ],
   "diagnostics": [
     {
       "tool": "ruff",
@@ -112,9 +116,14 @@ Create `pulci.toml` in the project root (all fields optional):
 ruff   = true    # ruff check on changed .py files (default: true)
 ty     = true    # ty check on changed .py files  (default: true)
 pytest = false   # pytest on tests/test_<changed>.py (default: false)
+
+[tools]          # optional — pin exact versions for reproducibility
+ruff   = "0.7.4" # uses uvx ruff@0.7.4 instead of auto-resolving
+ty     = "0.0.3"
 ```
 
 If `pulci.toml` is absent, defaults apply (`ruff=true`, `ty=true`, `pytest=false`).
+If `[tools]` is absent, pulci resolves each tool automatically: `.venv/bin/<tool>` → `$PATH` → `uvx <tool>`.
 
 ## Benchmark
 

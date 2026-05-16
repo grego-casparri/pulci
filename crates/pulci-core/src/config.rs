@@ -9,6 +9,7 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct Config {
     pub hooks: HooksConfig,
+    pub tools: ToolsConfig,
 }
 
 /// Controls which quality-gate adapters are active.
@@ -31,6 +32,18 @@ impl Default for HooksConfig {
             pytest: false,
         }
     }
+}
+
+/// Controls which version of each tool pulci uses (level-1 pinning).
+///
+/// All fields are `Option<String>`. `None` means "auto-resolve via
+/// venv / PATH / uvx fallback". A value pins to that version via uvx.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct ToolsConfig {
+    pub ruff: Option<String>,
+    pub ty: Option<String>,
+    pub pytest: Option<String>,
 }
 
 /// Load `pulci.toml` from `project_root`, using defaults if the file is absent.
@@ -97,6 +110,25 @@ mod tests {
         assert!(cfg.hooks.ruff); // default
         assert!(!cfg.hooks.ty);
         assert!(!cfg.hooks.pytest); // default
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn tools_version_parsed() {
+        let dir = write_toml("[tools]\nruff = \"0.7.4\"\n");
+        let cfg = load_config(&dir).unwrap();
+        assert_eq!(cfg.tools.ruff.as_deref(), Some("0.7.4"));
+        assert!(cfg.tools.ty.is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn tools_section_absent_gives_none() {
+        let dir = write_toml("[hooks]\nruff = true\n");
+        let cfg = load_config(&dir).unwrap();
+        assert!(cfg.tools.ruff.is_none());
+        assert!(cfg.tools.ty.is_none());
+        assert!(cfg.tools.pytest.is_none());
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -49,19 +49,24 @@ A persistent daemon:
 - Watches the filesystem, runs only on actual change
 - Exposes consultable state, so the agent's read is O(file read), not O(re-run)
 
-## Why structured JSON output as a first-class citizen
+## Output format design: compiler-style streaming, JSON state
 
-Existing tools target the terminal. Colored ANSI codes, progress bars,
-formatted tables — all hostile to LLM consumption. The agent has to:
+Two surfaces, two formats — each optimized for its primary consumer.
 
-1. Strip the ANSI
-2. Parse the human format (often regex-y, fragile)
-3. Reconstruct semantic meaning
-4. Spend tokens describing what it found
+**`.pulci/state.json` and `pulci status --json`** are JSON: lossless,
+schema-versioned, machine-readable. The agent calls `pulci status --json`
+after each edit and gets a structured object with typed severity, stable
+error codes, file+line+col, and resolved tool metadata.
 
-Every step adds latency and token cost. pulci's `--json` mode emits
-the schema the agent actually wants: one diagnostic per object, typed
-severity, stable error codes, file+line+col, no narrative.
+**`pulci start` streaming and `pulci status` (default)** emit
+compiler-style text: `file:line:col: severity[tool/code] message`. This
+is the format LLMs parse natively — they have seen millions of lines of
+gcc/rustc/Python tracebacks in training. Zero parsing overhead, 40–50%
+fewer tokens than equivalent JSON for the same diagnostics.
+
+The rule: **JSON when you need to query, compiler-style when you need to
+stream**. Confusing these two surfaces produces either unreadable diffs
+in agent prompts or fragile regex parsing of state files.
 
 This is the principle behind the comparison table in the README:
 **pulci is the agent-targeted quadrant of the quality-gate space.**

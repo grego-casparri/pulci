@@ -6,6 +6,24 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- 4-level tool resolution: pinned version (`pulci.toml [tools]`) → local venv
+  (`.venv/bin/`) → system PATH → `uvx` fallback. Zero-config for new projects,
+  full determinism for teams that want it.
+- `[tools]` config section in `pulci.toml` for explicit version pinning via uvx.
+- `tools` field in `state.json` — records which binary was used, its version,
+  and its source (`local-venv`, `system-path`, `pinned`, `uvx-latest`).
+- `stale` field in `state.json` is now meaningful: `true` when resolved tools
+  changed between daemon runs (e.g. ruff updated in venv).
+- `pulci status` human output shows a Tools table above diagnostics.
+
+### Changed
+- `pulci start --agent` now emits compiler-style diagnostics (aligns with
+  `FORMATS.md` / D-007). Previous JSON event lines (`{"event":"check",...}`)
+  are removed. NDJSON event mode deferred to v0.2 (`--events` flag).
+- Diagnostic format in `pulci status` updated to compiler-style:
+  `file:line:col: severity[tool/code]`.
+
 ## [0.0.1] - 2026-05-16
 
 ### Added

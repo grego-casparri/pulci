@@ -10,11 +10,21 @@ use crate::orchestrator::RunResult;
 pub const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolInfo {
+    pub name: String,
+    pub version: String,
+    /// "pinned" | "local-venv" | "system-path" | "uvx-latest"
+    pub source: String,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct State {
     pub schema_version: u32,
     pub timestamp: String,
     pub summary: Summary,
     pub diagnostics: Vec<Diagnostic>,
+    pub tools: Vec<ToolInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,13 +36,12 @@ pub struct Summary {
 }
 
 /// Aggregate hook results into a `State` ready to be written to disk.
-pub fn build_state(results: &[RunResult]) -> State {
+pub fn build_state(results: &[RunResult], tools: Vec<ToolInfo>, stale: bool) -> State {
     let mut all_diagnostics: Vec<Diagnostic> = results
         .iter()
         .flat_map(|r| r.diagnostics.iter().cloned())
         .collect();
 
-    // Deterministic ordering: file → line → col.
     all_diagnostics.sort_by(|a, b| {
         a.file
             .cmp(&b.file)
@@ -56,10 +65,21 @@ pub fn build_state(results: &[RunResult]) -> State {
             errors,
             warnings,
             checks_run: results.len() as u32,
-            stale: false,
+            stale,
         },
         diagnostics: all_diagnostics,
+        tools,
     }
+}
+
+/// Returns true if the resolved tool set changed between daemon runs.
+pub fn tools_changed(prev: &[ToolInfo], current: &[ToolInfo]) -> bool {
+    if prev.len() != current.len() {
+        return true;
+    }
+    prev.iter()
+        .zip(current.iter())
+        .any(|(p, c)| p.name != c.name || p.version != c.version || p.source != c.source)
 }
 
 /// Atomically write `state` to `state_file` (write tmp → rename).
@@ -161,7 +181,7 @@ mod tests {
 
     #[test]
     fn build_counts_correctly() {
-        let state = build_state(&[make_result(2, 1)]);
+        let state = build_state(&[make_result(2, 1)], vec![], false);
         assert_eq!(state.summary.errors, 2);
         assert_eq!(state.summary.warnings, 1);
         assert_eq!(state.summary.checks_run, 1);
@@ -171,7 +191,7 @@ mod tests {
 
     #[test]
     fn build_empty_results() {
-        let state = build_state(&[]);
+        let state = build_state(&[], vec![], false);
         assert_eq!(state.summary.errors, 0);
         assert_eq!(state.summary.checks_run, 0);
     }
@@ -179,7 +199,7 @@ mod tests {
     #[test]
     fn write_and_read_roundtrip() {
         let path = tmp_state_path();
-        let state = build_state(&[make_result(1, 0)]);
+        let state = build_state(&[make_result(1, 0)], vec![], false);
         write_state(&path, &state).unwrap();
 
         let loaded = read_state(&path).unwrap();
@@ -193,7 +213,7 @@ mod tests {
     #[test]
     fn write_is_atomic_no_tmp_remains() {
         let path = tmp_state_path();
-        write_state(&path, &build_state(&[])).unwrap();
+        write_state(&path, &build_state(&[], vec![], false)).unwrap();
         assert!(path.exists());
         assert!(!path.with_extension("json.tmp").exists());
         fs::remove_dir_all(path.parent().unwrap()).ok();
@@ -230,8 +250,49 @@ mod tests {
                 message: "a".into(),
             },
         ];
-        let state = build_state(&[results]);
+        let state = build_state(&[results], vec![], false);
         assert_eq!(state.diagnostics[0].file, PathBuf::from("a.py"));
         assert_eq!(state.diagnostics[1].file, PathBuf::from("b.py"));
+    }
+
+    #[test]
+    fn tools_in_state_roundtrip() {
+        let path = tmp_state_path();
+        let tools = vec![ToolInfo {
+            name: "ruff".into(),
+            version: "0.7.4".into(),
+            source: "local-venv".into(),
+            path: Some(".venv/bin/ruff".into()),
+        }];
+        let state = build_state(&[], tools, false);
+        write_state(&path, &state).unwrap();
+        let loaded = read_state(&path).unwrap();
+        assert_eq!(loaded.tools.len(), 1);
+        assert_eq!(loaded.tools[0].name, "ruff");
+        assert_eq!(loaded.tools[0].source, "local-venv");
+        fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn tools_changed_detects_version_bump() {
+        let prev = vec![ToolInfo { name: "ruff".into(), version: "0.4.0".into(), source: "local-venv".into(), path: None }];
+        let curr = vec![ToolInfo { name: "ruff".into(), version: "0.7.4".into(), source: "local-venv".into(), path: None }];
+        assert!(tools_changed(&prev, &curr));
+    }
+
+    #[test]
+    fn tools_changed_same_returns_false() {
+        let tools = vec![ToolInfo { name: "ruff".into(), version: "0.7.4".into(), source: "local-venv".into(), path: None }];
+        assert!(!tools_changed(&tools, &tools));
+    }
+
+    #[test]
+    fn stale_flag_is_persisted() {
+        let path = tmp_state_path();
+        let state = build_state(&[], vec![], true);
+        write_state(&path, &state).unwrap();
+        let loaded = read_state(&path).unwrap();
+        assert!(loaded.summary.stale);
+        fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 }

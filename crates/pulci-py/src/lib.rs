@@ -22,18 +22,8 @@ use pulci_core::hooks::ruff::RuffAdapter;
 use pulci_core::hooks::ty::TyAdapter;
 use pulci_core::hooks::Hook;
 use pulci_core::orchestrator::Orchestrator;
-use pulci_core::state::{build_state, write_state};
+use pulci_core::state::{build_state, read_state, write_state};
 use pulci_core::watcher::{watch, WatcherConfig};
-
-#[derive(serde::Serialize)]
-struct CheckEvent {
-    event: &'static str,
-    files: usize,
-    errors: u32,
-    warnings: u32,
-    checks_run: u32,
-    stale: bool,
-}
 
 /// Returns the pulci-core version string.
 #[pyfunction]
@@ -43,7 +33,7 @@ fn version() -> &'static str {
 
 /// Watch `path` for changes, run quality hooks, and write `.pulci/state.json`.
 ///
-/// When `agent` is true, each check event is printed as a single JSON line
+/// When `agent` is true, each check event is printed as compiler-style diagnostics
 /// instead of human-readable text — suitable for machine consumption.
 ///
 /// Blocks until Ctrl-C (raises KeyboardInterrupt via `py.check_signals()`).
@@ -57,23 +47,87 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         Default::default()
     });
 
+    // Resolve tools at startup (once).
+    let resolved_ruff = pulci_core::resolver::resolve_tool(
+        "ruff", &project_root, config.tools.ruff.as_deref(),
+    )
+    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    let resolved_ty = pulci_core::resolver::resolve_tool(
+        "ty", &project_root, config.tools.ty.as_deref(),
+    )
+    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    let resolved_pytest = pulci_core::resolver::resolve_tool(
+        "pytest", &project_root, config.tools.pytest.as_deref(),
+    )
+    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    // Convert to ToolInfo for state.json.
+    let tool_infos: Vec<pulci_core::state::ToolInfo> = [&resolved_ruff, &resolved_ty, &resolved_pytest]
+        .iter()
+        .map(|rt| {
+            use pulci_core::resolver::ToolSource;
+            let (source, path) = match &rt.source {
+                ToolSource::Pinned { .. } => ("pinned".into(), None),
+                ToolSource::LocalVenv { path } => {
+                    ("local-venv".into(), Some(path.display().to_string()))
+                }
+                ToolSource::SystemPath { path } => {
+                    ("system-path".into(), Some(path.display().to_string()))
+                }
+                ToolSource::UvxLatest => ("uvx-latest".into(), None),
+            };
+            pulci_core::state::ToolInfo {
+                name: rt.name.to_owned(),
+                version: rt.version.clone(),
+                source,
+                path,
+            }
+        })
+        .collect();
+
+    // Determine stale: tools changed since last daemon run?
+    let mut stale = read_state(&state_file)
+        .ok()
+        .is_some_and(|prev| pulci_core::state::tools_changed(&prev.tools, &tool_infos));
+
+    // Build hook list.
     let mut hook_list: Vec<Arc<dyn Hook>> = Vec::new();
     if config.hooks.ruff {
-        hook_list.push(Arc::new(RuffAdapter));
+        hook_list.push(Arc::new(RuffAdapter::new(&resolved_ruff)));
     }
     if config.hooks.ty {
-        hook_list.push(Arc::new(TyAdapter));
+        hook_list.push(Arc::new(TyAdapter::new(&resolved_ty)));
     }
     if config.hooks.pytest {
-        hook_list.push(Arc::new(PytestAdapter));
+        hook_list.push(Arc::new(PytestAdapter::new(&resolved_pytest)));
     }
 
-    let config_watcher = WatcherConfig {
-        path: project_root,
-    };
-    let (tx, rx) = mpsc::channel();
+    // Print resolved tools (human mode only).
+    if !agent {
+        let summary: String = [&resolved_ruff, &resolved_ty, &resolved_pytest]
+            .iter()
+            .map(|rt| {
+                use pulci_core::resolver::ToolSource;
+                let src = match &rt.source {
+                    ToolSource::Pinned { .. } => "pinned",
+                    ToolSource::LocalVenv { .. } => "local-venv",
+                    ToolSource::SystemPath { .. } => "system-path",
+                    ToolSource::UvxLatest => "uvx-latest",
+                };
+                format!("{}={} ({})", rt.name, rt.version, src)
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("resolved: {summary}");
+        println!("Watching {path} — press Ctrl-C to stop.");
+    }
 
+    let config_watcher = WatcherConfig { path: project_root };
+    let (tx, rx) = mpsc::channel();
     let (watcher_err_tx, watcher_err_rx) = mpsc::channel::<String>();
+
     std::thread::spawn(move || {
         if let Err(e) = watch(config_watcher, tx) {
             let _ = watcher_err_tx.send(e.to_string());
@@ -92,7 +146,6 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
     loop {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(first) => {
-                // Debounce: collect all events arriving within 50 ms.
                 let mut paths: HashSet<PathBuf> = HashSet::new();
                 paths.insert(first.path);
                 let deadline = Instant::now() + Duration::from_millis(50);
@@ -102,9 +155,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                         break;
                     }
                     match rx.recv_timeout(remaining) {
-                        Ok(e) => {
-                            paths.insert(e.path);
-                        }
+                        Ok(e) => { paths.insert(e.path); }
                         Err(_) => break,
                     }
                 }
@@ -115,32 +166,32 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                     continue;
                 }
 
-                let (_results, state) = py.allow_threads(|| {
+                let (results, state) = py.allow_threads(|| {
                     let r = rt.block_on(orchestrator.run(&changed));
-                    let s = build_state(&r);
+                    let s = build_state(&r, tool_infos.clone(), stale);
                     (r, s)
                 });
+                let _ = results;
+                stale = false; // only first run after tool change is stale
                 py.check_signals()?;
 
-                if agent {
-                    let ev = CheckEvent {
-                        event: "check",
-                        files: changed.len(),
-                        errors: state.summary.errors,
-                        warnings: state.summary.warnings,
-                        checks_run: state.summary.checks_run,
-                        stale: state.summary.stale,
-                    };
-                    println!("{}", serde_json::to_string(&ev).expect("CheckEvent serialization is infallible"));
-                } else {
-                    println!("checking {} file(s)...", changed.len());
+                // Compiler-style output (both human and agent modes per FORMATS.md / D-007).
+                for d in &state.diagnostics {
+                    let code_part = d.code.as_deref()
+                        .map(|c| format!("[{}/{}]", d.tool, c))
+                        .unwrap_or_else(|| format!("[{}]", d.tool));
                     println!(
-                        "  errors={} warnings={} checks={}",
-                        state.summary.errors,
-                        state.summary.warnings,
-                        state.summary.checks_run,
+                        "{}:{}:{}: {} {}",
+                        d.file.display(), d.line, d.col, d.severity, code_part
                     );
+                    println!("  {}", d.message);
                 }
+                println!(
+                    "{} errors, {} warnings ({} files checked)",
+                    state.summary.errors,
+                    state.summary.warnings,
+                    changed.len(),
+                );
 
                 if let Err(e) = write_state(&state_file, &state) {
                     eprintln!("pulci: failed to write state: {e}");
