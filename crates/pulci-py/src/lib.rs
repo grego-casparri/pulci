@@ -25,6 +25,22 @@ use pulci_core::orchestrator::Orchestrator;
 use pulci_core::state::{build_state, read_state, write_state};
 use pulci_core::watcher::{watch, WatcherConfig};
 
+fn resolved_to_info(rt: &pulci_core::resolver::ResolvedTool) -> pulci_core::state::ToolInfo {
+    use pulci_core::resolver::ToolSource;
+    let (source, path) = match &rt.source {
+        ToolSource::Pinned { .. } => ("pinned".into(), None),
+        ToolSource::LocalVenv { path } => ("local-venv".into(), Some(path.display().to_string())),
+        ToolSource::SystemPath { path } => ("system-path".into(), Some(path.display().to_string())),
+        ToolSource::UvxLatest => ("uvx-latest".into(), None),
+    };
+    pulci_core::state::ToolInfo {
+        name: rt.name.to_owned(),
+        version: rt.version.clone(),
+        source,
+        path,
+    }
+}
+
 /// Returns the pulci-core version string.
 #[pyfunction]
 fn version() -> &'static str {
@@ -47,80 +63,46 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         Default::default()
     });
 
-    // Resolve tools at startup (once).
-    let resolved_ruff = pulci_core::resolver::resolve_tool(
-        "ruff", &project_root, config.tools.ruff.as_deref(),
-    )
-    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    // Resolve only the tools that are enabled — disabled tools are skipped
+    // entirely so their cold-start cost (uvx download, --version probe) is
+    // never paid.
+    let mut hook_list: Vec<Arc<dyn Hook>> = Vec::new();
+    let mut tool_infos: Vec<pulci_core::state::ToolInfo> = Vec::new();
 
-    let resolved_ty = pulci_core::resolver::resolve_tool(
-        "ty", &project_root, config.tools.ty.as_deref(),
-    )
-    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-
-    let resolved_pytest = pulci_core::resolver::resolve_tool(
-        "pytest", &project_root, config.tools.pytest.as_deref(),
-    )
-    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-
-    // Convert to ToolInfo for state.json.
-    let tool_infos: Vec<pulci_core::state::ToolInfo> = [&resolved_ruff, &resolved_ty, &resolved_pytest]
-        .iter()
-        .map(|rt| {
-            use pulci_core::resolver::ToolSource;
-            let (source, path) = match &rt.source {
-                ToolSource::Pinned { .. } => ("pinned".into(), None),
-                ToolSource::LocalVenv { path } => {
-                    ("local-venv".into(), Some(path.display().to_string()))
-                }
-                ToolSource::SystemPath { path } => {
-                    ("system-path".into(), Some(path.display().to_string()))
-                }
-                ToolSource::UvxLatest => ("uvx-latest".into(), None),
-            };
-            pulci_core::state::ToolInfo {
-                name: rt.name.to_owned(),
-                version: rt.version.clone(),
-                source,
-                path,
-            }
-        })
-        .collect();
+    if config.hooks.ruff {
+        let r = pulci_core::resolver::resolve_tool("ruff", &project_root, config.tools.ruff.as_deref())
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        tool_infos.push(resolved_to_info(&r));
+        hook_list.push(Arc::new(RuffAdapter::new(&r)));
+    }
+    if config.hooks.ty {
+        let r = pulci_core::resolver::resolve_tool("ty", &project_root, config.tools.ty.as_deref())
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        tool_infos.push(resolved_to_info(&r));
+        hook_list.push(Arc::new(TyAdapter::new(&r)));
+    }
+    if config.hooks.pytest {
+        let r = pulci_core::resolver::resolve_tool("pytest", &project_root, config.tools.pytest.as_deref())
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        tool_infos.push(resolved_to_info(&r));
+        hook_list.push(Arc::new(PytestAdapter::new(&r)));
+    }
 
     // Determine stale: tools changed since last daemon run?
     let mut stale = read_state(&state_file)
         .ok()
         .is_some_and(|prev| pulci_core::state::tools_changed(&prev.tools, &tool_infos));
 
-    // Build hook list.
-    let mut hook_list: Vec<Arc<dyn Hook>> = Vec::new();
-    if config.hooks.ruff {
-        hook_list.push(Arc::new(RuffAdapter::new(&resolved_ruff)));
-    }
-    if config.hooks.ty {
-        hook_list.push(Arc::new(TyAdapter::new(&resolved_ty)));
-    }
-    if config.hooks.pytest {
-        hook_list.push(Arc::new(PytestAdapter::new(&resolved_pytest)));
-    }
-
     // Print resolved tools (human mode only).
     if !agent {
-        let summary: String = [&resolved_ruff, &resolved_ty, &resolved_pytest]
-            .iter()
-            .map(|rt| {
-                use pulci_core::resolver::ToolSource;
-                let src = match &rt.source {
-                    ToolSource::Pinned { .. } => "pinned",
-                    ToolSource::LocalVenv { .. } => "local-venv",
-                    ToolSource::SystemPath { .. } => "system-path",
-                    ToolSource::UvxLatest => "uvx-latest",
-                };
-                format!("{}={} ({})", rt.name, rt.version, src)
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        println!("resolved: {summary}");
+        if !tool_infos.is_empty() {
+            let summary = tool_infos
+                .iter()
+                .map(|t| format!("{}={} ({})", t.name, t.version, t.source))
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!("resolved: {summary}");
+        }
         println!("Watching {path} — press Ctrl-C to stop.");
     }
 
