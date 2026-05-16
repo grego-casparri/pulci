@@ -27,23 +27,26 @@ def test_start_help_exits_cleanly() -> None:
 
 def test_start_detects_file_creation() -> None:
     with tempfile.TemporaryDirectory() as tmp:
+        # Only ruff — avoids uvx cold-start for ty in CI, keeps the test fast.
+        (pathlib.Path(tmp) / "pulci.toml").write_text(
+            "[hooks]\nruff = true\nty = false\npytest = false\n"
+        )
         proc = subprocess.Popen(
             [PULCI_BIN, "start", tmp],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
-        time.sleep(0.3)
+        time.sleep(0.5)
 
         new_file = pathlib.Path(tmp) / "hello.py"
         new_file.write_text("x = 1\n")
 
-        time.sleep(0.5)
+        time.sleep(1.5)
         proc.terminate()
         stdout, _ = proc.communicate(timeout=5)
 
-        # The new output format emits a summary line like "0 errors, 0 warnings (N files checked)"
-        assert "errors" in stdout
+        assert "errors" in stdout, f"expected summary line in stdout, got: {stdout!r}"
 
 
 def test_start_ignores_pycache() -> None:
