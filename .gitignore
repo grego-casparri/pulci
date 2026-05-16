@@ -29,6 +29,10 @@ wheels/
 # Benchmark results (generated, not committed)
 benchmarks/results.json
 
+# Local-only files (AI agent instructions + planning docs)
+CLAUDE.md
+docs/plans/
+
 # Secrets / environment
 .env
 .env.*
