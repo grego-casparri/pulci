@@ -1,8 +1,8 @@
 Output demo/pulci.gif
 
-Set FontSize 13
-Set Width 900
-Set Height 460
+Set FontSize 14
+Set Width 800
+Set Height 280
 Set Theme "Catppuccin Mocha"
 Set Padding 20
 Set Shell bash
