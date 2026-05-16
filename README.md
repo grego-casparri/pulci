@@ -116,14 +116,16 @@ Create `pulci.toml` in the project root (all fields optional):
 ruff   = true    # ruff check on changed .py files (default: true)
 ty     = true    # ty check on changed .py files  (default: true)
 pytest = false   # pytest on tests/test_<changed>.py (default: false)
+clippy = false   # cargo clippy --workspace on changed .rs files (default: false)
 
 [tools]          # optional — pin exact versions for reproducibility
 ruff   = "0.7.4" # uses uvx ruff@0.7.4 instead of auto-resolving
 ty     = "0.0.3"
 ```
 
-If `pulci.toml` is absent, defaults apply (`ruff=true`, `ty=true`, `pytest=false`).
+If `pulci.toml` is absent, defaults apply (`ruff=true`, `ty=true`, `pytest=false`, `clippy=false`).
 If `[tools]` is absent, pulci resolves each tool automatically: `.venv/bin/<tool>` → `$PATH` → `uvx <tool>`.
+`clippy` requires Rust installed (`cargo` in PATH); it is opt-in because most Python-only projects have no Cargo workspace.
 
 ## Benchmark
 

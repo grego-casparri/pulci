@@ -59,7 +59,7 @@ After every edit you make, before deciding the next action:
 4. Otherwise, the `diagnostics` array tells you exactly what's wrong
 5. Fix and loop
 
-Do **not** run `ruff check`, `ty check`, or `pytest` directly while
+Do **not** run `ruff check`, `ty check`, `pytest`, or `cargo clippy` directly while
 pulci is active. You'll pay cold start each time and the daemon's
 cache will be redundant. The whole point is that pulci already ran
 them in the background while you were thinking.

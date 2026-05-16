@@ -118,8 +118,9 @@ These are real problems, but not pulci's:
 
 - **Fixing diagnostics.** Tools already do `--fix`. pulci reports state;
   the agent decides what to do with it.
-- **Pre-commit replacement.** prek owns that cleanly. pulci runs
-  between commits, not at the commit moment.
+- **Pre-commit replacement.** prek handles the commit-time gate (`.prek.yaml`
+  ships with the repo). pulci runs between commits; prek runs at the commit
+  moment. They are complementary, not competing.
 - **CI execution.** MegaLinter and friends own that. pulci's daemon
   doesn't make sense in ephemeral CI containers.
 - **MCP server (yet).** Post-v0.1. The CLI + JSON state file is a
