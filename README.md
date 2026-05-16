@@ -41,7 +41,12 @@ The short version: run `pulci start --agent` once, then call `pulci status --jso
 
 ## Install
 
-> **Prerequisites:** [Rust stable](https://rustup.rs/) and [uv](https://docs.astral.sh/uv/).
+```bash
+pip install pulci
+pulci --version
+```
+
+**From source** (to modify the Rust core — requires [Rust stable](https://rustup.rs/) and [uv](https://docs.astral.sh/uv/)):
 
 ```bash
 git clone https://github.com/grego-casparri/pulci
@@ -50,8 +55,6 @@ uv sync
 uv run maturin develop --release
 uv run pulci --version
 ```
-
-PyPI wheels are planned for v0.1.
 
 ## Usage
 
