@@ -7,6 +7,12 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- `pulci.toml` pin to a non-existent version (typo or unpublished) now bails at
+  daemon startup with a clear message naming the pin, the failing uvx invocation,
+  and the tool's stderr. Previously the daemon started cleanly and the user
+  saw a confusing "tool not found" on every save until they noticed the typo.
+  Implementation: resolver probes `uvx <tool>@<version> --version` for the
+  pinned path and propagates the failure as an actionable error.
 - Watcher now triggers a full project rescan when `notify` reports an inotify
   queue overflow (`event.need_rescan()`). Previously the overflow event arrived
   as an `Event` with empty `paths` and was silently dropped — the daemon kept

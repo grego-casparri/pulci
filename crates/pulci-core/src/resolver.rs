@@ -39,7 +39,10 @@ pub fn resolve_tool(
             );
         }
         let invocation = vec!["uvx".to_owned(), format!("{name}@{version}")];
-        let detected = detect_version(&invocation);
+        // Probe the pinned version at startup so a typo or non-existent version
+        // bails with a clear message before the first save, instead of producing
+        // a confusing "tool not found" on every hook run.
+        let detected = probe_pinned_version(name, version, &invocation)?;
         return Ok(ResolvedTool {
             name,
             version: detected,
@@ -118,6 +121,52 @@ fn find_in_system_path(name: &str) -> Option<PathBuf> {
 
 fn uvx_available() -> bool {
     Command::new("uvx").arg("--version").output().is_ok()
+}
+
+/// Run `uvx <name>@<version> --version` and bail with an actionable error
+/// if the invocation fails (typo, version not on PyPI, broken cache).
+///
+/// On success, returns the detected version string. On failure, the error
+/// message names the pin, the failing command, and the tool's stderr — so
+/// the user can fix `pulci.toml` without guessing what went wrong.
+fn probe_pinned_version(
+    name: &str,
+    version: &str,
+    invocation: &[String],
+) -> anyhow::Result<String> {
+    let (bin, args) = invocation
+        .split_first()
+        .ok_or_else(|| anyhow::anyhow!("invocation vector is empty"))?;
+    let output = Command::new(bin)
+        .args(args)
+        .arg("--version")
+        .output()
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "`{name}` is pinned to version {version} in pulci.toml but `uvx` failed to start: {e}"
+            )
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        anyhow::bail!(
+            "`{name}` is pinned to version {version} in pulci.toml but uvx \
+             could not resolve it.\n\
+             Command: {} {} --version\n\
+             Stderr: {stderr}\n\
+             Check that the version exists on PyPI and that your `pulci.toml [tools]` section is correct.",
+            bin,
+            args.join(" "),
+        );
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(text
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().last())
+        .unwrap_or("unknown")
+        .to_owned())
 }
 
 /// Run `invocation --version` and extract the last whitespace-separated token
@@ -219,5 +268,28 @@ mod tests {
         // The important guarantee is no panic and a coherent result type.
         let _ = result;
         fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Verifies that a pin to a non-existent version bails at startup, not at
+    /// first hook run. Network-bound (uvx queries PyPI), so `#[ignore]`'d in CI.
+    /// Run manually with: `cargo test -- --ignored pinned_version_that_does_not_exist`.
+    #[test]
+    #[ignore = "network-bound (uvx → PyPI); run manually with --ignored"]
+    fn pinned_version_that_does_not_exist_bails_with_actionable_error() {
+        if !uvx_available() {
+            return; // can't exercise this path without uvx
+        }
+        let dir = tmp_dir();
+        fs::create_dir_all(&dir).unwrap();
+
+        let result = resolve_tool("ruff", &dir, Some("99.99.99-definitely-not-real"));
+
+        fs::remove_dir_all(&dir).ok();
+
+        let err = result.expect_err("expected resolver to bail on bogus pinned version");
+        let msg = err.to_string();
+        assert!(msg.contains("99.99.99"), "version not in error: {msg}");
+        assert!(msg.contains("ruff"), "tool name not in error: {msg}");
+        assert!(msg.contains("pulci.toml"), "config file not mentioned: {msg}");
     }
 }
