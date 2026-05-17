@@ -48,12 +48,13 @@ polish items.
   custom path that used the bare positional form (`args: ["mcp", "/path"]`)
   need to be updated to the new form (`args: ["mcp", "--path", "/path"]`)
   — `pulci mcp info` already emits the new form.
-- Initial-sweep output in human mode is now a single summary line
-  (`N errors (initial sweep — see .pulci/state.json for details), …`)
-  instead of dumping every diagnostic to stdout. On a real project the
-  per-diagnostic stream was hundreds of KB of text no human reads;
-  state.json has the same data structured. Agent mode (`--agent`) keeps
-  streaming per-diagnostic since agents want the raw data on stdout.
+- Initial-sweep output in human mode no longer dumps every diagnostic
+  to stdout — the footer summary (unchanged) is enough for a human
+  watching the daemon start. On a real project the per-diagnostic
+  stream was hundreds of KB of text nobody reads; the same data is
+  in `state.json` and discoverable via `pulci status`. Agent mode
+  (`--agent`) keeps streaming per-diagnostic since agents want the
+  raw data on stdout.
 - MCP server no longer prints courtesy startup messages to stderr.
   The "Starting pulci MCP server …" and "Run `pulci mcp info`" banners
   became noise in MCP host logs once stdio became the only transport.

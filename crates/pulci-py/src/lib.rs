@@ -351,15 +351,13 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                 }
             }
             let elapsed = t0.elapsed().as_secs_f64();
-            let label = if agent {
-                "errors"
-            } else {
-                "errors (initial sweep — see .pulci/state.json for details)"
-            };
+            // Footer wording is unchanged across agent/human so tests and
+            // existing tools can parse both. The human-vs-agent ergonomic
+            // difference is in the per-diagnostic stream above — agent mode
+            // emits, human mode stays quiet and lets the user query state.json.
             println!(
-                "{} {}, {} warnings ({} files checked, {:.1}s)",
+                "{} errors, {} warnings ({} files checked, {:.1}s)",
                 state.summary.errors,
-                label,
                 state.summary.warnings,
                 changed.len(),
                 elapsed,
