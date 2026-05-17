@@ -110,6 +110,46 @@ def test_start_ignores_pycache() -> None:
         assert "__pycache__" not in stdout
 
 
+def test_start_ignores_atomic_write_temp_files() -> None:
+    """
+    Regression for commit 4fb6e6a: atomic-write editors create temp files
+    like `foo.py.tmp.<pid>.<hash>` then immediately rename them. Without an
+    extension filter on the event loop, the daemon ran ruff on the temp path
+    and surfaced spurious E902 ("file not found") diagnostics. The fix lives
+    in `crates/pulci-py/src/lib.rs` (event-loop extension filter).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = pathlib.Path(tmp)
+        (tmp_path / "pulci.toml").write_text("[hooks]\nruff = true\nty = false\npytest = false\n")
+        (tmp_path / "foo.py").write_text("x = 1\n")
+
+        proc, lines, thread = _start_daemon([PULCI_BIN, "start", tmp])
+
+        _wait_for_state(tmp_path / ".pulci" / "state.json")
+
+        # Simulate an atomic write: create a sibling temp file and remove it
+        # before any hook could possibly open it.
+        tmp_file = tmp_path / "foo.py.tmp.12345.abc"
+        tmp_file.write_text("x = 1\n")
+        time.sleep(0.5)
+        tmp_file.unlink(missing_ok=True)
+
+        time.sleep(1.0)  # give the daemon time to misbehave if the filter is gone
+
+        proc.terminate()
+        proc.wait(timeout=5)
+        thread.join(timeout=2)
+        stdout = "".join(lines)
+
+        # If the filter is removed, ruff runs against the deleted .tmp file
+        # and emits an E902 diagnostic referencing it. Either signal is enough
+        # to flag the regression.
+        assert ".tmp." not in stdout, (
+            f"daemon ran a hook against an atomic-write temp file:\n{stdout}"
+        )
+        assert "E902" not in stdout, f"E902 (file not found) leaked from a temp file:\n{stdout}"
+
+
 def test_start_agent_mode_emits_compiler_style_summary() -> None:
     """
     --agent mode emits compiler-style diagnostics per FORMATS.md.

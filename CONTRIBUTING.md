@@ -80,10 +80,30 @@ See `crates/pulci-core/src/hooks/ruff.rs` as the canonical example.
 - **Commits:** [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`).
 - **No emojis** in code or docs.
 
+## Regression tests
+
+**Every bug fix lands with a regression test.** The test must:
+
+1. Reproduce the bug on the codebase *before* the fix is applied (fail).
+2. Pass after the fix is applied (green).
+3. Live in the smallest scope that captures the failure — prefer Rust unit
+   tests for adapter or parser bugs, Python integration tests for daemon
+   lifecycle, watcher, CLI, or MCP surface bugs.
+
+The only exemptions are pure documentation changes and configuration changes
+that have no observable runtime behavior. Everything else — including tiny
+one-line fixes — needs a test that would have caught the bug.
+
+PR authors include the test in the same commit as the fix. Reviewers reject
+PRs that fix a bug without a regression test and ask for the test to be
+added before merging. When in doubt, write the test first, revert the fix
+locally, confirm the test fails, restore the fix.
+
 ## Pull requests
 
 - Keep PRs focused. One logical change per PR.
 - Add or update tests for every code change.
+- Bug fixes follow the regression-test policy above.
 - Update `CHANGELOG.md` under `[Unreleased]`.
 - CI must be green before merging.
 
