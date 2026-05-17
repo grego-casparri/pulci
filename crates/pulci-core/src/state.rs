@@ -20,6 +20,17 @@ pub fn next_state_version() -> u64 {
     STATE_VERSION.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Seed the global counter so the next `next_state_version()` returns `start`.
+///
+/// Daemon startup reads any prior `state.json` and seeds the counter with
+/// `prev.state_version + 1`, so monotonic state_version survives daemon
+/// restarts. Without this an agent that cached `since_version=42` before a
+/// restart would block on `pulci_status(since_version=42)` until the freshly
+/// reset counter caught up — many checks instead of one.
+pub fn seed_state_version(start: u64) {
+    STATE_VERSION.store(start, Ordering::Relaxed);
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolInfo {
     pub name: String,
@@ -383,6 +394,35 @@ mod tests {
         let state = build_state(&results, vec![], false);
         assert_eq!(state.tool_errors[0].tool, "clippy");
         assert_eq!(state.tool_errors[1].tool, "ty");
+    }
+
+    // Tests that mutate STATE_VERSION must serialise. cargo test runs in
+    // parallel by default; without this guard the seed test would race the
+    // monotonicity test (and any build_state call) for the global counter.
+    static COUNTER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn next_state_version_is_monotonically_increasing() {
+        let _guard = COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let a = next_state_version();
+        let b = next_state_version();
+        assert!(b > a, "expected monotonic increase: a={a} b={b}");
+    }
+
+    #[test]
+    fn seed_state_version_resets_counter_for_persistence_across_restarts() {
+        let _guard = COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // Simulate a daemon restart: previous run wrote state_version=99, the
+        // new daemon seeds the counter to 100 so the next write produces 100.
+        seed_state_version(100);
+        let v = next_state_version();
+        assert_eq!(v, 100, "expected seed to take effect on next call");
+        let v2 = next_state_version();
+        assert_eq!(v2, 101, "expected continued monotonic increase after seed");
     }
 
     #[test]

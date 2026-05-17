@@ -14,6 +14,16 @@ Version scheme: [Semantic Versioning](https://semver.org/).
   drop the keyword from your calls. Causal synchronisation continues to
   work through `since_version` alone, which is what the code did all along.
 
+### Fixed
+- `state_version` now survives daemon restarts. The monotonic counter
+  was previously process-local (`AtomicU64::new(0)`), so an agent that
+  cached `since_version=42` and then restarted the daemon would block
+  on `pulci_status(since_version=42)` until the freshly-reset counter
+  caught up. The daemon now seeds the counter from the previous
+  `state.json` at startup, so the next emitted version is always
+  strictly greater than the last one written — including across
+  process boundaries.
+
 ### Changed
 - MCP `pulci_status` now distinguishes "no daemon" from "daemon alive but
   pre-scan" — matching the CLI behaviour. When `state.json` is absent and

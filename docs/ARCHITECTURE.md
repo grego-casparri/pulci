@@ -139,10 +139,13 @@ complete state or the new complete state — never a partial. There is no
 incremental update path; every write is a whole `State`.
 
 **Monotonic `state_version`.** Incremented exactly once per `build_state` call,
-which happens exactly once per check pass. The counter never decreases within
-the lifetime of a daemon. Consumers can use `state_version > last_seen` as the
-sole signal that a new result is available (this is the contract that backs
-`pulci_status(since_version=...)` per D-013).
+which happens exactly once per check pass. The counter never decreases —
+**including across daemon restarts**: the new daemon reads the previous
+`state.json` and seeds its counter so the next emitted version is strictly
+greater than the last one written. Consumers can use `state_version > last_seen`
+as the sole signal that a new result is available, even when the agent has
+outlived the daemon process (this is the contract that backs
+`pulci_status(since_version=...)`).
 
 **Single instance per project.** `pulci start` acquires an advisory exclusive
 lock on `.pulci/daemon.lock` (`fs2::FileExt::try_lock_exclusive`) before any

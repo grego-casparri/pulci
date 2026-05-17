@@ -262,10 +262,18 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         hook_list.push(Arc::new(CargoAdapter::new(&r, hook_timeout)));
     }
 
-    // Determine stale: tools changed since last daemon run?
-    let mut stale = read_state(&state_file)
-        .map_err(|e| eprintln!("pulci: warning: could not read prior state for stale check: {e}"))
-        .ok()
+    // Read prior state once: feed both stale detection AND state_version
+    // seeding. Without seeding, the monotonic counter resets to 0 on every
+    // restart and breaks `pulci_status(since_version=...)` for agents that
+    // cached a version from the previous run.
+    let prev_state = read_state(&state_file)
+        .map_err(|e| eprintln!("pulci: warning: could not read prior state: {e}"))
+        .ok();
+    if let Some(prev) = &prev_state {
+        pulci_core::state::seed_state_version(prev.state_version + 1);
+    }
+    let mut stale = prev_state
+        .as_ref()
         .is_some_and(|prev| pulci_core::state::tools_changed(&prev.tools, &tool_infos));
 
     let heartbeat_path = project_root.join(".pulci").join("heartbeat");
