@@ -94,6 +94,31 @@ def start(
 
 
 @app.command()
+def doctor(
+    path: Annotated[str, typer.Argument(help="Project root to diagnose.")] = ".",
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit structured JSON instead of human output."),
+    ] = False,
+) -> None:
+    """
+    Self-diagnosis: project root, pulci.toml validity, tool resolution
+    for every enabled hook, .pulci/ writability, daemon status, state.json
+    integrity. Exits 0 when everything passes, 1 if any check fails. Run
+    this when "pulci start" surfaces a confusing error — it tells you which
+    layer is broken without running the daemon.
+    """
+    from pulci.doctor import diagnose, render_human
+
+    report = diagnose(pathlib.Path(path))
+    if json_output:
+        typer.echo(json.dumps(report.to_json(), indent=2))
+    else:
+        typer.echo(render_human(report))
+    raise typer.Exit(code=report.exit_code())
+
+
+@app.command()
 def status(
     path: Annotated[str, typer.Argument(help="Project root to read state from.")] = ".",
     json_output: Annotated[

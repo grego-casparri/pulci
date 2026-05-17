@@ -111,6 +111,38 @@ In the benchmark fixture (28 files, all hooks enabled), pulci's per-iteration co
 
 The MCP tool docstring documents the exact response shapes for `not_running`, `running_no_checks_yet`, `timeout`, `error`, and `tool_errors` so an agent can branch cleanly on each — see [`docs/AGENTS.md`](docs/AGENTS.md#handling-edge-cases) for the full table.
 
+## Diagnose your setup: `pulci doctor`
+
+When something looks wrong, `pulci doctor` tells you which layer is broken
+without running the daemon:
+
+```bash
+$ pulci doctor
+Configuration
+  ✓ project root       /home/me/my-project
+  ✓ pulci.toml         valid; enabled hooks: ruff, ty, pytest
+
+Tool resolution
+  ✓ ruff               0.7.4     via local-venv  .venv/bin/ruff
+  ✓ ty                 0.0.3     via local-venv  .venv/bin/ty
+  ✓ pytest             8.3.0     via local-venv  .venv/bin/pytest
+
+Filesystem
+  ✓ .pulci/ writable   .pulci
+
+Daemon
+  ✓ running            not running (run `pulci start` to launch)
+
+State
+  ✓ state.json         not present (daemon never ran)
+
+All checks passed.
+```
+
+It catches typos in `pulci.toml` (like `clipy = true` inside `[hooks]`),
+missing tools, permission issues, and corrupted state files. Exits 0 when
+clean, 1 if anything's broken. Add `--json` for structured output.
+
 ## For AI agents
 
 AI coding agents (Claude Code, Cursor, Codex) should start at **[docs/AGENTS.md](docs/AGENTS.md)**.

@@ -7,6 +7,15 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `pulci doctor [path]` — self-diagnosis without starting the daemon.
+  Verifies project root exists, `pulci.toml` parses and contains no
+  unknown keys (catches typos like `clipy` inside `[hooks]` before the
+  Rust loader would), every enabled hook resolves through the same
+  4-level chain `pulci start` uses (printing version + source +
+  binary path), `.pulci/` is writable, the daemon's heartbeat is
+  alive/stale/dead, and any existing `state.json` is valid. Exits
+  0 when every check passes, 1 if anything fails. `--json` emits
+  the structured report for agents.
 - `pulci mcp install <host>` — auto-installer for Claude Desktop and Cursor.
   Locates the host's config file (per-OS for Claude Desktop, project-local
   or `--global` for Cursor), merges the pulci entry into `mcpServers`
