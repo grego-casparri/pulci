@@ -7,15 +7,15 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 
-**v0.0.1** — Apache-2.0 — [docs/AGENTS.md](docs/AGENTS.md)
+**v0.0.2** — Apache-2.0 — [docs/AGENTS.md](docs/AGENTS.md)
 
 ## Why
 
 When AI coding agents (Claude Code, Cursor, Codex) iterate on a Python project,
 they invoke `ruff check`, `ty check`, `pytest` over and over. Pre-commit hooks
 run at commit time. CI runs even later. Nothing in the existing tooling stack was
-designed for the loop an agent actually runs: **edit → check → edit, fifty times
-an hour**.
+designed for the loop an agent actually runs: **edit → check → edit, dozens to
+hundreds of times per hour**.
 
 **pulci** is a small daemon — Rust core, Python CLI — that runs your configured
 quality gates continuously as files change, and exposes the aggregated state as

@@ -6,7 +6,18 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-05-17
+
 ### Added
+- `pulci mcp` — MCP server (FastMCP, stdio transport) with `pulci_status` tool.
+  Agents call `pulci_status` instead of invoking ruff/ty/pytest directly.
+- `pulci mcp info` — prints the JSON config block to paste into
+  `claude_desktop_config.json` or `.cursor/mcp.json`. Zero-lookup adoption path.
+- `pulci_status` MCP tool accepts `wait_for_file`, `since_version`, and `timeout_ms`
+  parameters for causal synchronisation: agents get fresh state after each edit
+  with zero polling and zero fixed sleeps (see `docs/AGENTS.md`).
+- `state_version` field in `state.json` — monotonic counter incremented on every
+  write. Enables the `since_version` wait contract. Schema updated accordingly.
 - JSON Schema for `.pulci/state.json` (`schemas/state.v1.schema.json`) and `pulci.toml`
   (`schemas/pulci-toml.schema.json`) — machine-readable contracts for state consumers and
   config authors. Schema links added to `README.md` and `docs/AGENTS.md`.
@@ -24,11 +35,21 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 - `pulci status` human output shows a Tools table above diagnostics.
 
 ### Changed
-- `pulci start --agent` now emits compiler-style diagnostics (aligns with
-  `FORMATS.md` / D-007). Previous JSON event lines (`{"event":"check",...}`)
-  are removed. NDJSON event mode deferred to v0.2 (`--events` flag).
+- `pulci start --agent` suppresses human-readable startup messages only.
+  Diagnostic output is compiler-style in all modes. Structured exit events
+  (`{"event":"stopped"}`, `{"event":"error","message":"..."}`) emitted on lifecycle changes.
+  Previous per-check JSON event lines (`{"event":"check",...}`) are removed — were aspirational,
+  never implemented.
 - Diagnostic format in `pulci status` updated to compiler-style:
   `file:line:col: severity[tool/code]`.
+- `pulci status` with no daemon running exits 0 (not 1) — missing daemon is not an error.
+
+### Fixed
+- Hook adapters now propagate errors instead of panicking or silently returning empty
+  results. Signal-killed subprocesses are reported, not swallowed.
+- Stale detection logs a warning instead of silently discarding read errors on prior state.
+- Watcher no longer triggers re-checks when `.pulci/state.json` itself is written.
+- MCP startup messages moved to stderr to avoid corrupting the stdio transport protocol.
 
 ## [0.0.1] - 2026-05-16
 
