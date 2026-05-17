@@ -121,7 +121,7 @@ pub fn read_state(state_file: &Path) -> anyhow::Result<State> {
 }
 
 /// Current UTC time as an ISO 8601 string, without external date dependencies.
-fn now_iso8601() -> String {
+pub fn now_iso8601() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())

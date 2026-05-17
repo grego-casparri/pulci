@@ -60,4 +60,5 @@ dev = [
     "maturin>=1.7,<2.0",
     "pytest>=8",
     "ruff>=0.7",
+    "tiktoken>=0.7",
 ]

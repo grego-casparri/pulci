@@ -4,6 +4,7 @@ Command-line interface for pulci.
 
 from __future__ import annotations
 
+import datetime
 import json
 import pathlib
 from typing import Annotated, Literal
@@ -13,6 +14,39 @@ import typer
 from pulci import __version__, _native
 from pulci.mcp_server import mcp as _mcp_server
 from pulci.mcp_server import print_mcp_info
+
+_HEARTBEAT_ALIVE_SECS = 30
+_HEARTBEAT_DEAD_SECS = 120
+
+
+def _heartbeat_info(state_dir: pathlib.Path) -> dict:
+    """
+    Read .pulci/heartbeat and compute daemon health.
+
+    Returns a dict with keys: daemon_status, daemon_heartbeat_at,
+    heartbeat_seconds_ago. daemon_status is one of: alive, stale_heartbeat, dead.
+    """
+    hb_file = state_dir / "heartbeat"
+    if not hb_file.exists():
+        return {"daemon_status": "dead", "daemon_heartbeat_at": None, "heartbeat_seconds_ago": None}
+    try:
+        ts_str = hb_file.read_text().strip()
+        ts = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        now = datetime.datetime.now(datetime.timezone.utc)
+        secs_ago = int((now - ts).total_seconds())
+        if secs_ago < _HEARTBEAT_ALIVE_SECS:
+            status = "alive"
+        elif secs_ago < _HEARTBEAT_DEAD_SECS:
+            status = "stale_heartbeat"
+        else:
+            status = "dead"
+        return {
+            "daemon_status": status,
+            "daemon_heartbeat_at": ts_str,
+            "heartbeat_seconds_ago": secs_ago,
+        }
+    except Exception:
+        return {"daemon_status": "dead", "daemon_heartbeat_at": None, "heartbeat_seconds_ago": None}
 
 
 def _version_callback(value: bool) -> None:
@@ -62,7 +96,7 @@ def start(
         bool,
         typer.Option(
             "--agent",
-            help="Emit compact JSON events per check instead of human text.",
+            help="Suppress startup messages. Structured exit events emitted on stop or error.",
         ),
     ] = False,
 ) -> None:
@@ -119,9 +153,32 @@ def status(
         raise typer.Exit(code=2) from exc
 
     summary = state.get("summary", {})
+    hb = _heartbeat_info(state_file.parent)
+
+    # Compute last-check age from state timestamp
+    last_check_secs: int | None = None
+    ts_str = state.get("timestamp")
+    if ts_str:
+        try:
+            ts = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            last_check_secs = int(
+                (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds()
+            )
+        except Exception:
+            pass
 
     if json_output:
-        typer.echo(raw)
+        state["daemon_status"] = hb["daemon_status"]
+        if hb["daemon_heartbeat_at"] is not None:
+            state["daemon_heartbeat_at"] = hb["daemon_heartbeat_at"]
+        age: dict = {}
+        if hb["heartbeat_seconds_ago"] is not None:
+            age["heartbeat_seconds_ago"] = hb["heartbeat_seconds_ago"]
+        if last_check_secs is not None:
+            age["last_check_seconds_ago"] = last_check_secs
+        if age:
+            state["age"] = age
+        typer.echo(json.dumps(state))
         if summary.get("errors", 0) > 0:
             raise typer.Exit(code=1)
         return
@@ -137,10 +194,24 @@ def status(
             typer.echo(f"  {name:<8} {version:<8} {source:<12} {path}")
         typer.echo("")
 
+    daemon_status = hb["daemon_status"]
+    hb_secs = hb["heartbeat_seconds_ago"]
+    if daemon_status == "alive":
+        typer.echo(f"  daemon    alive (heartbeat {hb_secs}s ago)")
+    elif daemon_status == "stale_heartbeat":
+        typer.echo(f"  daemon    stale (heartbeat {hb_secs}s ago — may be processing)")
+    else:
+        typer.echo("  daemon    dead — run 'pulci start' to restart")
+        if last_check_secs is not None:
+            typer.echo(
+                f"            last check {last_check_secs}s ago — diagnostics may be outdated"
+            )
+
     typer.echo(f"  errors    {summary.get('errors', 0)}")
     typer.echo(f"  warnings  {summary.get('warnings', 0)}")
     typer.echo(f"  checks    {summary.get('checks_run', 0)}")
-    typer.echo(f"  updated   {state.get('timestamp', 'unknown')}")
+    if last_check_secs is not None:
+        typer.echo(f"  last check {last_check_secs}s ago")
     typer.echo(f"  stale     {summary.get('stale', False)}")
 
     diagnostics = state.get("diagnostics", [])
