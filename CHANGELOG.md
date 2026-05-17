@@ -7,6 +7,13 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Watcher now triggers a full project rescan when `notify` reports an inotify
+  queue overflow (`event.need_rescan()`). Previously the overflow event arrived
+  as an `Event` with empty `paths` and was silently dropped — the daemon kept
+  running while missing every event after the overflow, leaving `state.json`
+  stale relative to disk with no signal to consumers. `FileEvent` is now an
+  enum (`Changed { path, kind }` / `Rescan`) and the event loop routes `Rescan`
+  to the same scan logic used at startup.
 - Event loop now filters watcher events to `.py` files (and `.rs` when clippy is
   enabled) before passing them to hooks. Previously, atomic-write temp files
   (e.g. `file.tmp.<pid>.<hash>`) triggered a ruff check that returned E902

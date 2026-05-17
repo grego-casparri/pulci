@@ -40,7 +40,7 @@ use pulci_core::hooks::ty::TyAdapter;
 use pulci_core::hooks::Hook;
 use pulci_core::orchestrator::Orchestrator;
 use pulci_core::state::{build_state, read_state, write_state};
-use pulci_core::watcher::{watch, WatcherConfig};
+use pulci_core::watcher::{watch, FileEvent, WatcherConfig};
 
 fn resolved_to_info(rt: &pulci_core::resolver::ResolvedTool) -> pulci_core::state::ToolInfo {
     use pulci_core::resolver::ToolSource;
@@ -273,7 +273,11 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(first) => {
                 let mut paths: HashSet<PathBuf> = HashSet::new();
-                paths.insert(first.path);
+                let mut needs_rescan = false;
+                match first {
+                    FileEvent::Rescan => { needs_rescan = true; }
+                    FileEvent::Changed { path, .. } => { paths.insert(path); }
+                }
                 let deadline = Instant::now() + Duration::from_millis(50);
                 loop {
                     let remaining = deadline.saturating_duration_since(Instant::now());
@@ -281,19 +285,31 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                         break;
                     }
                     match rx.recv_timeout(remaining) {
-                        Ok(e) => { paths.insert(e.path); }
+                        Ok(FileEvent::Rescan) => { needs_rescan = true; }
+                        Ok(FileEvent::Changed { path, .. }) => { paths.insert(path); }
                         Err(_) => break,
                     }
                 }
 
-                let files: Vec<PathBuf> = paths
-                    .into_iter()
-                    .filter(|p| !is_excluded(p, &project_root_for_scan, &config.watch.exclude))
-                    .filter(|p| {
-                        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-                        ext == "py" || (config.hooks.clippy && ext == "rs")
-                    })
-                    .collect();
+                let files: Vec<PathBuf> = if needs_rescan {
+                    // Watcher reported lost events — re-collect every source file under
+                    // the project root and let the cache filter the actually-changed ones.
+                    // Identical surface to the startup scan; orchestrator handles the rest.
+                    collect_py_files(
+                        &project_root_for_scan,
+                        &project_root_for_scan,
+                        &config.watch.exclude,
+                    )
+                } else {
+                    paths
+                        .into_iter()
+                        .filter(|p| !is_excluded(p, &project_root_for_scan, &config.watch.exclude))
+                        .filter(|p| {
+                            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                            ext == "py" || (config.hooks.clippy && ext == "rs")
+                        })
+                        .collect()
+                };
                 let changed = cache.filter_changed(&files);
                 if changed.is_empty() {
                     continue;
