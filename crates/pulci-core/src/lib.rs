@@ -23,6 +23,7 @@ pub mod config;
 pub mod hooks;
 pub mod orchestrator;
 pub mod resolver;
+pub mod scan;
 pub mod state;
 pub mod watcher;
 

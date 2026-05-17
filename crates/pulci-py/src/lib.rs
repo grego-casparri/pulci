@@ -40,6 +40,7 @@ use pulci_core::hooks::ty::TyAdapter;
 use pulci_core::hooks::Hook;
 use pulci_core::orchestrator::Orchestrator;
 use pulci_core::state::{build_state, read_state, write_state};
+use pulci_core::scan::{collect_py_files, is_excluded, is_source_file};
 use pulci_core::watcher::{watch, FileEvent, WatcherConfig};
 
 fn resolved_to_info(rt: &pulci_core::resolver::ResolvedTool) -> pulci_core::state::ToolInfo {
@@ -62,37 +63,6 @@ fn resolved_to_info(rt: &pulci_core::resolver::ResolvedTool) -> pulci_core::stat
 #[pyfunction]
 fn version() -> &'static str {
     pulci_core::version()
-}
-
-fn is_excluded(path: &Path, project_root: &Path, excludes: &[String]) -> bool {
-    excludes.iter().any(|excl| path.starts_with(project_root.join(excl)))
-}
-
-/// Collect all `.py` files under `root`, skipping ignored and excluded directories.
-fn collect_py_files(root: &Path, project_root: &Path, excludes: &[String]) -> Vec<PathBuf> {
-    let mut result = Vec::new();
-    collect_py_files_inner(root, project_root, excludes, &mut result);
-    result
-}
-
-fn collect_py_files_inner(dir: &Path, project_root: &Path, excludes: &[String], result: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if pulci_core::watcher::is_ignored(&path) {
-            continue;
-        }
-        if is_excluded(&path, project_root, excludes) {
-            continue;
-        }
-        if path.is_dir() {
-            collect_py_files_inner(&path, project_root, excludes, result);
-        } else if path.extension().map(|e| e == "py").unwrap_or(false) {
-            result.push(path);
-        }
-    }
 }
 
 /// Watch `path` for changes, run quality hooks, and write `.pulci/state.json`.
@@ -320,10 +290,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                     paths
                         .into_iter()
                         .filter(|p| !is_excluded(p, &project_root_for_scan, &config.watch.exclude))
-                        .filter(|p| {
-                            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-                            ext == "py" || (config.hooks.clippy && ext == "rs")
-                        })
+                        .filter(|p| is_source_file(p, config.hooks.clippy))
                         .collect()
                 };
                 let changed = cache.filter_changed(&files);

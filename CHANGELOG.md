@@ -48,6 +48,14 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 - Benchmark `_fixture_stats` now correctly counts test failures via `-v` and
   regex, replacing the broken quiet-mode heuristic.
 
+### Changed
+- Moved filesystem scan logic (`is_excluded`, `collect_py_files`, and a new
+  `is_source_file` helper) from `crates/pulci-py` to `crates/pulci-core::scan`.
+  The crate boundary now matches its claim — `pulci-core` is pure Rust with no
+  PyO3 dependency, reusable by future non-Python consumers. No behavior change;
+  net -32 lines from `pulci-py/src/lib.rs`, +13 Rust unit tests in `pulci-core`
+  exercising the scan logic without spinning up Python.
+
 ### Added
 - `tool_errors` field in `state.json`: aggregates non-diagnostic hook failures
   (timeout, signal kill, parser crash) into a structured array. Closes the
