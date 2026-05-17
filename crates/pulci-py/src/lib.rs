@@ -11,11 +11,24 @@
 use std::collections::HashSet;
 use std::io::Write as _;
 use std::path::PathBuf;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use pyo3::prelude::*;
+
+fn write_heartbeat(path: &Path) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let now = pulci_core::state::now_iso8601();
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, now).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
 use pulci_core::cache::FileCache;
 use pulci_core::config::load_config;
 use pulci_core::hooks::cargo::CargoAdapter;
@@ -87,7 +100,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         let r = pulci_core::resolver::resolve_tool("pytest", &project_root, config.tools.pytest.as_deref())
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         tool_infos.push(resolved_to_info(&r));
-        hook_list.push(Arc::new(PytestAdapter::new(&r)));
+        hook_list.push(Arc::new(PytestAdapter::new(&r, project_root.clone())));
     }
     if config.hooks.clippy {
         let r = pulci_core::resolver::resolve_tool("cargo", &project_root, None)
@@ -102,6 +115,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         .ok()
         .is_some_and(|prev| pulci_core::state::tools_changed(&prev.tools, &tool_infos));
 
+    let heartbeat_path = project_root.join(".pulci").join("heartbeat");
     let config_watcher = WatcherConfig { path: project_root };
     let (tx, rx) = mpsc::channel();
     let (watcher_err_tx, watcher_err_rx) = mpsc::channel::<String>();
@@ -130,6 +144,23 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         println!("Watching {path} — press Ctrl-C to stop.");
         let _ = std::io::stdout().flush();
     }
+
+    // Heartbeat thread: writes .pulci/heartbeat every 10s while the daemon is alive.
+    // pulci status derives daemon_status from the age of this file — no PID files,
+    // no race conditions. If the daemon dies for any reason, heartbeats stop and
+    // status correctly reports "dead" after 120s.
+    let heartbeat_stop = Arc::new(AtomicBool::new(false));
+    let heartbeat_stop_clone = Arc::clone(&heartbeat_stop);
+    std::thread::spawn(move || {
+        write_heartbeat(&heartbeat_path);
+        loop {
+            std::thread::sleep(Duration::from_secs(10));
+            if heartbeat_stop_clone.load(Ordering::Relaxed) {
+                break;
+            }
+            write_heartbeat(&heartbeat_path);
+        }
+    });
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
@@ -211,6 +242,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         }
     }
 
+    heartbeat_stop.store(true, Ordering::Relaxed);
     Ok(())
 }
 

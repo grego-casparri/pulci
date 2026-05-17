@@ -6,6 +6,32 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `PytestAdapter` now resolves test-file paths relative to the project root and
+  sets `Command::current_dir` to the project root, so pytest actually runs when
+  the daemon is started from a directory other than the watched project.
+- Watcher now ignores `.ruff_cache/`, `.pytest_cache/`, and `pytest-cache-files-*`
+  directories. Previously, ruff and pytest writing their caches inside the watched
+  tree triggered spurious re-check cycles that overwrote the real state.json.
+
+### Added
+- Benchmark fixture expanded to 28 files including `tests/test_utils.py`, giving
+  the benchmark's steady-state touch target (`sampleapp/utils.py`) a real
+  corresponding test file so all three hooks exercise meaningful work.
+- Benchmark `_fixture_stats` now correctly counts test failures via `-v` and
+  regex, replacing the broken quiet-mode heuristic.
+
+### Added
+- Daemon heartbeat: `pulci start` writes `.pulci/heartbeat` every 10 s from a
+  background thread, independent of check activity. `pulci status` derives
+  `daemon_status` (`alive` / `stale_heartbeat` / `dead`) from the heartbeat age,
+  with thresholds 30 s and 120 s. No PID files, no false positives on long checks.
+- `pulci status` (human and `--json`) now includes `daemon_status`,
+  `daemon_heartbeat_at`, and `age` (`heartbeat_seconds_ago`, `last_check_seconds_ago`).
+- `pulci_status` MCP tool returns `{"status": "not_running"}` immediately on the
+  blocking path (`since_version`) when the daemon heartbeat is dead, instead of
+  waiting for the full timeout.
+
 ## [0.0.2] - 2026-05-17
 
 ### Added

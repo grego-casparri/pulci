@@ -5,11 +5,12 @@ use super::{Diagnostic, Hook, Severity};
 
 pub struct PytestAdapter {
     invocation: Vec<String>,
+    project_root: PathBuf,
 }
 
 impl PytestAdapter {
-    pub fn new(resolved: &crate::resolver::ResolvedTool) -> Self {
-        Self { invocation: resolved.invocation.clone() }
+    pub fn new(resolved: &crate::resolver::ResolvedTool, project_root: PathBuf) -> Self {
+        Self { invocation: resolved.invocation.clone(), project_root }
     }
 }
 
@@ -24,7 +25,7 @@ impl Hook for PytestAdapter {
             .filter_map(|f| find_test_file(f))
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
-            .filter(|p| p.exists())
+            .filter(|p| self.project_root.join(p).exists())
             .collect();
 
         if test_files.is_empty() {
@@ -37,6 +38,7 @@ impl Hook for PytestAdapter {
         let output = Command::new(bin)
             .args(prefix_args)
             .args(["--tb=no", "-q", "--no-header"])
+            .current_dir(&self.project_root)
             .args(&test_files)
             .output()?;
 

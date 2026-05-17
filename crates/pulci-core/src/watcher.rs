@@ -8,11 +8,17 @@ use serde::Serialize;
 const IGNORED_DIRS: &[&str] = &[
     ".git",
     ".pulci",
+    ".ruff_cache",
+    ".pytest_cache",
     "__pycache__",
     "node_modules",
     ".venv",
     "target",
 ];
+
+// Prefix-based ignores for directories whose names include a random suffix
+// (e.g. `pytest-cache-files-<hash>` created by pytest's tmp machinery).
+const IGNORED_PREFIXES: &[&str] = &["pytest-cache-files-"];
 
 #[derive(Debug, Serialize)]
 pub struct FileEvent {
@@ -24,12 +30,14 @@ pub struct WatcherConfig {
     pub path: PathBuf,
 }
 
-/// Returns true if any path component matches an ignored directory name.
+/// Returns true if any path component matches an ignored directory name or prefix.
 pub fn is_ignored(path: &Path) -> bool {
     path.components().any(|c| {
-        IGNORED_DIRS
-            .iter()
-            .any(|&ignored| c.as_os_str() == ignored)
+        let name = c.as_os_str();
+        IGNORED_DIRS.iter().any(|&d| name == d)
+            || name
+                .to_str()
+                .is_some_and(|s| IGNORED_PREFIXES.iter().any(|&p| s.starts_with(p)))
     })
 }
 
@@ -108,6 +116,21 @@ mod tests {
     #[test]
     fn ignores_target() {
         assert!(is_ignored(Path::new("target/debug/pulci")));
+    }
+
+    #[test]
+    fn ignores_ruff_cache() {
+        assert!(is_ignored(Path::new(".ruff_cache/0.15.0/abc123")));
+    }
+
+    #[test]
+    fn ignores_pytest_cache() {
+        assert!(is_ignored(Path::new(".pytest_cache/v/cache/nodeids")));
+    }
+
+    #[test]
+    fn ignores_pytest_cache_files_tmpdir() {
+        assert!(is_ignored(Path::new("pytest-cache-files-abc123/README.md")));
     }
 
     #[test]
