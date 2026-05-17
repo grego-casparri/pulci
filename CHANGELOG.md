@@ -7,17 +7,20 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
-- `pulci start` now propagates SIGTERM to active hook subprocesses (ruff, ty,
-  pytest, clippy) before exiting, so external `kill <pid>` / systemd / supervisor
-  scripts no longer leave orphan hook processes behind for up to the per-hook
-  timeout window. Implementation: `pulci-core::hooks` maintains a global
-  registry of active hook PIDs; the daemon installs a SIGTERM handler
-  (via `signal-hook`, Unix-only) that drains the registry with `libc::kill`
-  and lets the main loop exit cleanly. The daemon prints `{"event":"stopped"}`
-  in `--agent` mode or `Stopped (SIGTERM received).` in human mode before
-  exiting with status 0. Terminal Ctrl-C was already handled by the kernel
-  delivering SIGINT to the foreground process group; this fix is specifically
-  for external SIGTERM where only the daemon receives the signal.
+- Hook subprocesses (ruff, ty, pytest, clippy) no longer outlive the daemon as
+  orphans when an external process terminates `pulci start`. Cross-platform:
+  - Unix: SIGTERM handler (via `signal-hook`) drains a global registry of
+    active hook PIDs with `libc::kill`, then lets the main loop exit cleanly
+    with `{"event":"stopped"}` (agent) or `Stopped (SIGTERM received).` (human)
+    and exit code 0. Terminal Ctrl-C was already handled by kernel pgid
+    propagation; this is specifically for external `kill <pid>` / systemd /
+    supervising scripts where only the daemon receives the signal.
+  - Windows: the daemon assigns itself to a Job Object with
+    `KILL_ON_JOB_CLOSE` (via `windows-sys`). Children inherit job membership.
+    When the daemon exits — clean exit, Ctrl-C, `taskkill`, even `taskkill /F`
+    which is unintercepable — the kernel closes the job handle, the flag
+    fires, and every still-running child is terminated. Covers more exit
+    paths than the Unix mechanism (which cannot intercept SIGKILL).
 
 ## [0.0.3] - 2026-05-17
 

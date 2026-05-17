@@ -21,6 +21,73 @@ use std::time::{Duration, Instant};
 use fs2::FileExt;
 use pyo3::prelude::*;
 
+/// Windows equivalent of the Unix SIGTERM handler: assign the daemon process to
+/// a Job Object with `KILL_ON_JOB_CLOSE`. Children spawned by the daemon (ruff,
+/// ty, pytest, clippy via uvx) inherit job membership automatically. When the
+/// daemon process exits for any reason — clean exit, Ctrl-C, `taskkill`, even
+/// `taskkill /F` which Unix SIGTERM cannot intercept — the kernel closes the
+/// last handle to the job, which fires KILL_ON_JOB_CLOSE and terminates every
+/// still-running child.
+///
+/// Best-effort: on the rare environment where AssignProcessToJobObject fails
+/// (older Windows, restrictive parent job without nested-job support), the
+/// daemon logs a warning and continues without child-cleanup guarantee.
+#[cfg(windows)]
+fn setup_kill_on_close_job() {
+    use std::{mem, ptr};
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    unsafe {
+        let job = CreateJobObjectW(ptr::null(), ptr::null());
+        if job.is_null() {
+            eprintln!(
+                "pulci: warning: CreateJobObject failed; \
+                 child hook subprocesses may outlive the daemon on shutdown"
+            );
+            return;
+        }
+
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+        if SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const _,
+            mem::size_of_val(&info) as u32,
+        ) == 0
+        {
+            eprintln!(
+                "pulci: warning: SetInformationJobObject failed; \
+                 child hook subprocesses may outlive the daemon on shutdown"
+            );
+            CloseHandle(job);
+            return;
+        }
+
+        if AssignProcessToJobObject(job, GetCurrentProcess()) == 0 {
+            eprintln!(
+                "pulci: warning: AssignProcessToJobObject failed (already in a non-nestable job?); \
+                 child hook subprocesses may outlive the daemon on shutdown"
+            );
+            CloseHandle(job);
+            return;
+        }
+
+        // Intentionally do NOT close the job handle. KILL_ON_JOB_CLOSE fires
+        // when the last handle to the job closes; keeping ours open ties job
+        // lifetime to daemon process lifetime. The kernel reclaims the handle
+        // automatically on process exit, which is exactly when we want the
+        // termination of in-job children to fire.
+    }
+}
+
 fn write_heartbeat(path: &Path) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -104,11 +171,19 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
     }
     let _lock_file = lock_file;
 
-    // Install a SIGTERM handler that kills active hook subprocesses before the
-    // daemon exits. Terminal Ctrl-C is already handled by the kernel sending
-    // SIGINT to the foreground process group (children die alongside the
-    // daemon), so this is specifically for external `kill <pid>`, systemd,
-    // and supervising scripts where only the daemon receives the signal.
+    // Cross-platform shutdown propagation to hook subprocesses.
+    //
+    // Unix: external `kill -TERM <daemon_pid>` reaches only the daemon, so we
+    // register a SIGTERM handler that drains `ACTIVE_HOOK_PIDS` and lets the
+    // main loop exit cleanly. Terminal Ctrl-C is unaffected (kernel delivers
+    // SIGINT to the whole foreground process group, children die naturally).
+    //
+    // Windows: there is no SIGTERM. `taskkill` (without /F) sends
+    // CTRL_CLOSE_EVENT to console apps but only after a 5s grace; `taskkill /F`
+    // is unintercepable. Instead we use a Job Object with KILL_ON_JOB_CLOSE,
+    // which lets the kernel terminate every in-job child the moment the
+    // daemon's handle to the job closes — covering all exit paths including
+    // /F and crashes.
     let shutdown = Arc::new(AtomicBool::new(false));
     #[cfg(unix)]
     {
@@ -127,6 +202,8 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
             }
         });
     }
+    #[cfg(windows)]
+    setup_kill_on_close_job();
 
     let config = load_config(&project_root).unwrap_or_else(|e| {
         eprintln!("pulci: warning: failed to load pulci.toml ({e}), using defaults");
