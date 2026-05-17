@@ -179,9 +179,25 @@ pub trait Hook: Send + Sync {
 mod timeout_tests {
     use super::*;
 
+    /// Serializes tests that interact with `ACTIVE_HOOK_PIDS` or
+    /// `kill_all_active_hooks()`. Cargo runs `#[test]`s in parallel by default,
+    /// and tests that register PIDs would otherwise race with the
+    /// `kill_all_*` tests — the kill iterator would send SIGTERM to a child
+    /// owned by another test, masking timeout-induced failures as
+    /// signal-induced exits. Acquire this lock at the top of any test that
+    /// touches the registry.
+    #[cfg(unix)]
+    static HOOK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[cfg(unix)]
+    fn hook_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        HOOK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[cfg(unix)]
     #[test]
     fn run_with_timeout_kills_hung_process() {
+        let _guard = hook_test_guard();
         let mut cmd = Command::new("sleep");
         cmd.arg("5");
         let result = run_with_timeout(cmd, Duration::from_millis(200), "sleep-test");
@@ -194,6 +210,7 @@ mod timeout_tests {
     #[cfg(unix)]
     #[test]
     fn run_with_timeout_returns_output_when_fast() {
+        let _guard = hook_test_guard();
         let mut cmd = Command::new("sh");
         cmd.args(["-c", "printf hello && printf world >&2"]);
         let output = run_with_timeout(cmd, Duration::from_secs(5), "sh-test").unwrap();
@@ -213,6 +230,7 @@ mod timeout_tests {
     #[cfg(unix)]
     #[test]
     fn register_unregister_pid_round_trip() {
+        let _guard = hook_test_guard();
         // Use a synthetic PID that is extremely unlikely to collide with a real
         // process; the registry doesn't validate, so this exercises the data
         // structure mechanics without touching the OS.
@@ -226,6 +244,7 @@ mod timeout_tests {
     #[cfg(unix)]
     #[test]
     fn kill_all_active_hooks_terminates_a_real_child() {
+        let _guard = hook_test_guard();
         // The acid test: spawn a long-running subprocess, register it, fire
         // kill_all, expect the OS to mark it as killed-by-signal.
         let mut child = Command::new("sleep")
@@ -261,6 +280,7 @@ mod timeout_tests {
     #[cfg(unix)]
     #[test]
     fn kill_all_active_hooks_empty_registry_is_noop() {
+        let _guard = hook_test_guard();
         // No panic, no error. Safe to call without any registered hooks.
         kill_all_active_hooks();
     }
