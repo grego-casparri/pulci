@@ -100,32 +100,10 @@ fn write_heartbeat(path: &Path) {
 }
 use pulci_core::cache::FileCache;
 use pulci_core::config::load_config;
-use pulci_core::hooks::cargo::CargoAdapter;
-use pulci_core::hooks::pytest::PytestAdapter;
-use pulci_core::hooks::ruff::RuffAdapter;
-use pulci_core::hooks::ruff_format::RuffFormatAdapter;
-use pulci_core::hooks::ty::TyAdapter;
-use pulci_core::hooks::Hook;
 use pulci_core::orchestrator::Orchestrator;
 use pulci_core::state::{build_state, read_state, write_state};
 use pulci_core::scan::{collect_py_files, is_excluded, is_source_file};
 use pulci_core::watcher::{watch, FileEvent, WatcherConfig};
-
-fn resolved_to_info(rt: &pulci_core::resolver::ResolvedTool) -> pulci_core::state::ToolInfo {
-    use pulci_core::resolver::ToolSource;
-    let (source, path) = match &rt.source {
-        ToolSource::Pinned { .. } => ("pinned".into(), None),
-        ToolSource::LocalVenv { path } => ("local-venv".into(), Some(path.display().to_string())),
-        ToolSource::SystemPath { path } => ("system-path".into(), Some(path.display().to_string())),
-        ToolSource::UvxLatest => ("uvx-latest".into(), None),
-    };
-    pulci_core::state::ToolInfo {
-        name: rt.name.to_owned(),
-        version: rt.version.clone(),
-        source,
-        path,
-    }
-}
 
 /// Returns the pulci-core version string.
 #[pyfunction]
@@ -211,56 +189,25 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         Default::default()
     });
 
-    // Resolve only the tools that are enabled — disabled tools are skipped
-    // entirely so their cold-start cost (uvx download, --version probe) is
-    // never paid.
-    let mut hook_list: Vec<Arc<dyn Hook>> = Vec::new();
-    let mut tool_infos: Vec<pulci_core::state::ToolInfo> = Vec::new();
-
-    // Resolve the hook subprocess timeout from config (falls back to
-    // DEFAULT_HOOK_TIMEOUT). One value applies to every enabled hook.
+    // Resolve hook subprocess timeout (falls back to DEFAULT_HOOK_TIMEOUT).
     let hook_timeout: Duration = config
         .hooks
         .timeout_secs
         .map(Duration::from_secs)
         .unwrap_or(pulci_core::hooks::DEFAULT_HOOK_TIMEOUT);
 
-    // ruff and ruff_format share the same binary — resolve once, mount both
-    // adapters as configured.
-    if config.hooks.ruff || config.hooks.ruff_format {
-        let r = pulci_core::resolver::resolve_tool("ruff", &project_root, config.tools.ruff.as_deref())
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        tool_infos.push(resolved_to_info(&r));
-        if config.hooks.ruff {
-            hook_list.push(Arc::new(RuffAdapter::new(&r, hook_timeout)));
-        }
-        if config.hooks.ruff_format {
-            hook_list.push(Arc::new(RuffFormatAdapter::new(&r, hook_timeout)));
-        }
-    }
-    if config.hooks.ty {
-        let r = pulci_core::resolver::resolve_tool("ty", &project_root, config.tools.ty.as_deref())
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        tool_infos.push(resolved_to_info(&r));
-        hook_list.push(Arc::new(TyAdapter::new(&r, hook_timeout)));
-    }
-    if config.hooks.pytest {
-        let r = pulci_core::resolver::resolve_tool("pytest", &project_root, config.tools.pytest.as_deref())
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        tool_infos.push(resolved_to_info(&r));
-        hook_list.push(Arc::new(PytestAdapter::new(
-            &r,
-            project_root.clone(),
-            hook_timeout,
-            config.hooks.pytest_test_patterns.clone(),
-        )));
-    }
-    if config.hooks.clippy {
-        let r = pulci_core::resolver::resolve_tool("cargo", &project_root, None)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        tool_infos.push(resolved_to_info(&r));
-        hook_list.push(Arc::new(CargoAdapter::new(&r, hook_timeout)));
-    }
+    // Build the active hook list via the pulci-core helper. The closure
+    // wraps `resolve_tool` with the project_root bound; pulci-core stays
+    // PyO3-free and the dispatch logic gets unit-tested without spawning
+    // real subprocesses (see hooks::build_hook_list_tests).
+    let (hook_list, tool_infos) = pulci_core::hooks::build_hook_list(
+        &config.hooks,
+        &config.tools,
+        &project_root,
+        hook_timeout,
+        |name, pinned| pulci_core::resolver::resolve_tool(name, &project_root, pinned),
+    )
+    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
     // Read prior state once: feed both stale detection AND state_version
     // seeding. Without seeding, the monotonic counter resets to 0 on every

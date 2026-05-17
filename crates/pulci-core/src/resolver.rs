@@ -18,6 +18,32 @@ pub struct ResolvedTool {
     pub invocation: Vec<String>,
 }
 
+impl ResolvedTool {
+    /// Convert to the serialisable `ToolInfo` form used in `state.json`. The
+    /// `source` enum is flattened to one of the four documented string values
+    /// (`pinned` / `local-venv` / `system-path` / `uvx-latest`).
+    pub fn to_tool_info(&self) -> crate::state::ToolInfo {
+        let (source, path) = match &self.source {
+            ToolSource::Pinned { .. } => ("pinned".to_string(), None),
+            ToolSource::LocalVenv { path } => (
+                "local-venv".to_string(),
+                Some(path.display().to_string()),
+            ),
+            ToolSource::SystemPath { path } => (
+                "system-path".to_string(),
+                Some(path.display().to_string()),
+            ),
+            ToolSource::UvxLatest => ("uvx-latest".to_string(), None),
+        };
+        crate::state::ToolInfo {
+            name: self.name.to_owned(),
+            version: self.version.clone(),
+            source,
+            path,
+        }
+    }
+}
+
 /// Resolve `name` using 4-level precedence:
 /// 1. Pinned version in pulci.toml → `uvx name@version`
 /// 2. Binary in `.venv/bin/` → use that path directly
