@@ -34,6 +34,20 @@ fn unregister_hook_pid(pid: u32) {
     }
 }
 
+/// RAII guard that unregisters a PID from `ACTIVE_HOOK_PIDS` on drop.
+///
+/// Without this, an error path in `run_with_timeout` (e.g. `child.try_wait()`
+/// returning `Err`) would propagate via `?` and leave the PID registered
+/// forever. A later `kill_all_active_hooks()` could then target a recycled
+/// PID belonging to an unrelated process — see audit P0-2.
+struct HookPidGuard(u32);
+
+impl Drop for HookPidGuard {
+    fn drop(&mut self) {
+        unregister_hook_pid(self.0);
+    }
+}
+
 /// Send SIGTERM to every hook subprocess currently registered as active.
 ///
 /// Called from the daemon's SIGTERM handler to prevent orphan ruff/ty/pytest/
@@ -87,6 +101,10 @@ pub fn run_with_timeout(
 
     let pid = child.id();
     register_hook_pid(pid);
+    // Drop guard guarantees unregistration on every return path including
+    // ?-propagated errors. Created AFTER successful register so a future
+    // panic between register and guard creation cannot leave a stranded PID.
+    let _pid_guard = HookPidGuard(pid);
 
     let stdout_reader = child.stdout.take().map(spawn_drainer);
     let stderr_reader = child.stderr.take().map(spawn_drainer);
@@ -99,7 +117,6 @@ pub fn run_with_timeout(
         if start.elapsed() >= timeout {
             let _ = child.kill();
             let _ = child.wait();
-            unregister_hook_pid(pid);
             anyhow::bail!(
                 "{name} timed out after {}s and was killed by pulci",
                 timeout.as_secs()
@@ -114,8 +131,6 @@ pub fn run_with_timeout(
     let stderr = stderr_reader
         .and_then(|h| h.join().ok())
         .unwrap_or_default();
-
-    unregister_hook_pid(pid);
 
     Ok(Output {
         status,

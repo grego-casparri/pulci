@@ -5,8 +5,10 @@ use serde::Deserialize;
 /// Configuration loaded from `pulci.toml` in the project root.
 ///
 /// All fields have sensible defaults so the file is entirely optional.
+/// `deny_unknown_fields` is on so typos in `pulci.toml` (e.g. `clipy` instead
+/// of `clippy`) fail loudly at startup instead of silently using defaults.
 #[derive(Debug, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub hooks: HooksConfig,
     pub tools: ToolsConfig,
@@ -15,7 +17,7 @@ pub struct Config {
 
 /// Controls which paths the daemon watches and scans.
 #[derive(Debug, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct WatchConfig {
     /// Relative paths (from project root) to skip entirely — initial scan and file events.
     /// Useful for fixture or vendor directories that contain intentional violations.
@@ -24,7 +26,7 @@ pub struct WatchConfig {
 
 /// Controls which quality-gate adapters are active.
 #[derive(Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct HooksConfig {
     /// Run `ruff check` on changed Python files. Default: true.
     pub ruff: bool,
@@ -68,7 +70,7 @@ impl Default for HooksConfig {
 /// All fields are `Option<String>`. `None` means "auto-resolve via
 /// venv / PATH / uvx fallback". A value pins to that version via uvx.
 #[derive(Debug, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ToolsConfig {
     pub ruff: Option<String>,
     pub ty: Option<String>,
@@ -161,10 +163,29 @@ mod tests {
 
     #[test]
     fn clippy_enabled_via_toml() {
-        let dir = write_toml("[hooks]\nclipy = false\nruff = true\n");
+        let dir = write_toml("[hooks]\nclippy = true\nruff = true\n");
         let cfg = load_config(&dir).unwrap();
         assert!(cfg.hooks.ruff);
-        assert!(!cfg.hooks.clippy);
+        assert!(cfg.hooks.clippy);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn typo_in_hook_key_fails_loudly() {
+        // Regression for an audit finding: a typo like `clipy` previously
+        // parsed silently as "unknown key, use defaults", masking the user's
+        // intent. With `deny_unknown_fields` the daemon refuses to start.
+        let dir = write_toml("[hooks]\nclipy = true\n");
+        let result = load_config(&dir);
+        assert!(result.is_err(), "expected typo to be rejected");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn typo_at_top_level_fails_loudly() {
+        let dir = write_toml("[hokks]\nruff = true\n");
+        let result = load_config(&dir);
+        assert!(result.is_err(), "expected unknown top-level section to be rejected");
         std::fs::remove_dir_all(&dir).ok();
     }
 

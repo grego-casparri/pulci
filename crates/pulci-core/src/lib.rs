@@ -11,9 +11,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Returns the pulci-core version as a static string.
 ///
-/// This is the function exposed through PyO3 to Python on Day 1
-/// so that `pulci --version` has something real to print while the
-/// daemon machinery is being built out.
+/// Re-exported by `pulci-py` for Python so `pulci --version` has a
+/// canonical source of truth.
 pub fn version() -> &'static str {
     VERSION
 }
