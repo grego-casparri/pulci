@@ -218,11 +218,13 @@ was updated in the venv). The daemon detected the change and re-resolved tools.
 When `stale` is true, treat the current diagnostics as a full re-check, not an
 incremental one. It returns to `false` on the next check pass.
 
-**No state until first change:** pulci does not scan existing files on startup —
-it only runs checks when a file actually changes. `state.json` is written after
-the first filesystem change event. If `pulci status` returns no state, touch any
-source file to trigger the first check. This is a trade-off: fast daemon startup
-at the cost of no baseline state until the first edit.
+**Baseline state available shortly after startup:** `pulci start` runs a full
+project scan immediately after the watcher initialises, so `.pulci/state.json`
+is populated within seconds of daemon start. `pulci status` works without
+needing to touch a file first. The short window between `pulci start` and
+the scan completing is reported as `daemon_status: "alive"` with `status:
+"running_no_checks_yet"` (CLI) or `status: "not_running"` (MCP, until state.json
+exists — a known asymmetry tracked for closure).
 
 ## What pulci is not
 

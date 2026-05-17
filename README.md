@@ -143,17 +143,32 @@ Create `pulci.toml` in the project root (all fields optional):
 
 ```toml
 [hooks]
-ruff   = true    # ruff check on changed .py files (default: true)
-ty     = true    # ty check on changed .py files  (default: true)
-pytest = false   # pytest on tests/test_<changed>.py (default: false)
+ruff         = true    # ruff check on changed .py files (default: true)
+ruff_format  = false   # ruff format --check; format violations as diagnostics (default: false)
+ty           = true    # ty check on changed .py files (default: true)
+pytest       = false   # pytest on matching test files (default: false)
+timeout_secs = 120     # per-hook subprocess timeout in seconds (default: 120)
 
-[tools]          # optional — pin exact versions for reproducibility
-ruff   = "0.7.4" # uses uvx ruff@0.7.4 instead of auto-resolving
+# How pytest maps source → tests. Each template substitutes {stem} for the
+# source's file stem. Empty (default) keeps `tests/test_{stem}.py` only.
+pytest_test_patterns = [
+    "tests/test_{stem}.py",
+    "test/test_{stem}.py",
+]
+
+[tools]            # optional — pin exact versions for reproducibility
+ruff   = "0.7.4"   # uses uvx ruff@0.7.4 instead of auto-resolving
 ty     = "0.0.3"
+
+[watch]            # optional — paths to skip from initial scan and events
+exclude = ["vendor", "fixtures"]
 ```
 
-If `pulci.toml` is absent, defaults apply (`ruff=true`, `ty=true`, `pytest=false`).
-If `[tools]` is absent, pulci resolves each tool automatically: `.venv/bin/<tool>` → `$PATH` → `uvx <tool>`.
+If `pulci.toml` is absent, defaults apply (`ruff=true`, `ty=true`, `pytest=false`, `ruff_format=false`, timeout 120 s).
+Unknown keys fail at startup (typos like `clipy` are rejected loudly rather than silently ignored).
+If `[tools]` is absent, pulci resolves each tool automatically: `.venv/bin/<tool>` → `$PATH` → `uvx <tool>`. Pinned versions are probed at daemon startup, so a typo or unpublished version fails fast.
+
+pulci watches `.py` files only (`.rs` is included for internal Rust dogfooding, not a user-facing feature). Non-Python files are ignored without notice.
 
 ## Benchmark
 
