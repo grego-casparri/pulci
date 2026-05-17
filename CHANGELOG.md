@@ -7,6 +7,15 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `[hooks] ruff_format = true` enables a new adapter that runs
+  `ruff format --check` on changed `.py` files. Files that would be
+  reformatted appear as `error[ruff_format/format]` diagnostics in
+  `state.json` and the compiler-style stream, so agents can act on them
+  the same way they act on lint errors. Default is `false` (opt-in) —
+  format gating is opinionated and many teams prefer to handle it at
+  commit time. Independent of the `ruff` hook (lint check): enable one,
+  the other, or both. The `ruff` binary is resolved once and shared
+  between the two adapters.
 - `[hooks] timeout_secs` in `pulci.toml`: per-hook subprocess wall-clock
   timeout, applied uniformly to every enabled hook. Defaults to 120 s when
   omitted. Useful when a project's pytest suite or cold `cargo clippy`

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub mod cargo;
 pub mod pytest;
 pub mod ruff;
+pub mod ruff_format;
 pub mod ty;
 
 /// Registry of hook subprocess PIDs currently being awaited by `run_with_timeout`.

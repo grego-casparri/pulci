@@ -103,6 +103,7 @@ use pulci_core::config::load_config;
 use pulci_core::hooks::cargo::CargoAdapter;
 use pulci_core::hooks::pytest::PytestAdapter;
 use pulci_core::hooks::ruff::RuffAdapter;
+use pulci_core::hooks::ruff_format::RuffFormatAdapter;
 use pulci_core::hooks::ty::TyAdapter;
 use pulci_core::hooks::Hook;
 use pulci_core::orchestrator::Orchestrator;
@@ -224,11 +225,18 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         .map(Duration::from_secs)
         .unwrap_or(pulci_core::hooks::DEFAULT_HOOK_TIMEOUT);
 
-    if config.hooks.ruff {
+    // ruff and ruff_format share the same binary — resolve once, mount both
+    // adapters as configured.
+    if config.hooks.ruff || config.hooks.ruff_format {
         let r = pulci_core::resolver::resolve_tool("ruff", &project_root, config.tools.ruff.as_deref())
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         tool_infos.push(resolved_to_info(&r));
-        hook_list.push(Arc::new(RuffAdapter::new(&r, hook_timeout)));
+        if config.hooks.ruff {
+            hook_list.push(Arc::new(RuffAdapter::new(&r, hook_timeout)));
+        }
+        if config.hooks.ruff_format {
+            hook_list.push(Arc::new(RuffFormatAdapter::new(&r, hook_timeout)));
+        }
     }
     if config.hooks.ty {
         let r = pulci_core::resolver::resolve_tool("ty", &project_root, config.tools.ty.as_deref())

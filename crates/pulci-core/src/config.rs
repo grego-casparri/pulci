@@ -28,6 +28,9 @@ pub struct WatchConfig {
 pub struct HooksConfig {
     /// Run `ruff check` on changed Python files. Default: true.
     pub ruff: bool,
+    /// Run `ruff format --check` on changed Python files. Default: false.
+    /// Independent of `ruff` — enable one, the other, or both.
+    pub ruff_format: bool,
     /// Run `ty check` on changed Python files. Default: true.
     pub ty: bool,
     /// Run pytest on test files corresponding to changed source files. Default: false.
@@ -44,6 +47,7 @@ impl Default for HooksConfig {
     fn default() -> Self {
         Self {
             ruff: true,
+            ruff_format: false,
             ty: true,
             pytest: false,
             clippy: false,
@@ -196,6 +200,23 @@ mod tests {
         let dir = write_toml("[hooks]\ntimeout_secs = 300\n");
         let cfg = load_config(&dir).unwrap();
         assert_eq!(cfg.hooks.timeout_secs, Some(300));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ruff_format_defaults_to_false() {
+        let dir = write_toml("");
+        let cfg = load_config(&dir).unwrap();
+        assert!(!cfg.hooks.ruff_format);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ruff_format_independent_of_ruff() {
+        let dir = write_toml("[hooks]\nruff = false\nruff_format = true\n");
+        let cfg = load_config(&dir).unwrap();
+        assert!(!cfg.hooks.ruff);
+        assert!(cfg.hooks.ruff_format);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

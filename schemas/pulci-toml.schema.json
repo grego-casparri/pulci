@@ -16,6 +16,11 @@
           "default": true,
           "description": "Run ruff check on changed .py files."
         },
+        "ruff_format": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run ruff format --check on changed .py files. Reports files that would be reformatted as error[ruff_format/format] diagnostics. Independent of `ruff` — enable one, the other, or both."
+        },
         "ty": {
           "type": "boolean",
           "default": true,
