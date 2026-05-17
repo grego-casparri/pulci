@@ -6,6 +6,16 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-05-17
+
+Robustness pass plus three user-facing config knobs. Hook subprocesses
+no longer outlive the daemon on either Unix or Windows; `state_version`
+survives daemon restarts so cached `since_version` values stay valid;
+the MCP tool reaches parity with `pulci status --json`. New `[hooks]`
+keys make pytest layout, ruff format gating, and per-hook timeout
+configurable. One small breaking change: the no-op `wait_for_file`
+parameter on the MCP `pulci_status` tool is removed.
+
 ### Removed
 - `wait_for_file` parameter on the `pulci_status` MCP tool. The parameter
   was documented as a "semantic hint" with no functional effect — the
