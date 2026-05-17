@@ -98,8 +98,8 @@ def test_mcp_info_command_is_pulci_bin(capsys: pytest.CaptureFixture) -> None:
     first_block = captured.out[: captured.out.find("\n\n")]
     config = json.loads(first_block)
     command = config["mcpServers"]["pulci"]["command"]
-    # Command must end with "pulci" — either found via shutil.which or fallback path.
-    assert pathlib.Path(command).name == "pulci"
+    # Command must resolve to the pulci binary (stem covers pulci.EXE on Windows).
+    assert pathlib.Path(command).stem == "pulci"
 
 
 def test_wait_for_file_without_since_version_is_fast_path(tmp_path: pathlib.Path) -> None:
