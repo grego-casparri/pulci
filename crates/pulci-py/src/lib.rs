@@ -62,6 +62,30 @@ fn version() -> &'static str {
     pulci_core::version()
 }
 
+/// Collect all `.py` files under `root`, skipping ignored directories.
+fn collect_py_files(root: &Path) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+    collect_py_files_inner(root, &mut result);
+    result
+}
+
+fn collect_py_files_inner(dir: &Path, result: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if pulci_core::watcher::is_ignored(&path) {
+            continue;
+        }
+        if path.is_dir() {
+            collect_py_files_inner(&path, result);
+        } else if path.extension().map(|e| e == "py").unwrap_or(false) {
+            result.push(path);
+        }
+    }
+}
+
 /// Watch `path` for changes, run quality hooks, and write `.pulci/state.json`.
 ///
 /// When `agent` is true, each check event is printed as compiler-style diagnostics
@@ -116,6 +140,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         .is_some_and(|prev| pulci_core::state::tools_changed(&prev.tools, &tool_infos));
 
     let heartbeat_path = project_root.join(".pulci").join("heartbeat");
+    let project_root_for_scan = project_root.clone();
     let config_watcher = WatcherConfig { path: project_root };
     let (tx, rx) = mpsc::channel();
     let (watcher_err_tx, watcher_err_rx) = mpsc::channel::<String>();
@@ -170,6 +195,42 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
 
     let orchestrator = Orchestrator::new(hook_list);
     let mut cache = FileCache::new();
+
+    // Initial full-project scan so state.json exists before the first file event.
+    {
+        let all_py = collect_py_files(&project_root_for_scan);
+        let changed = cache.filter_changed(&all_py);
+        if !changed.is_empty() {
+            let t0 = Instant::now();
+            let (results, state) = py.allow_threads(|| {
+                let r = rt.block_on(orchestrator.run(&changed));
+                let s = build_state(&r, tool_infos.clone(), stale);
+                (r, s)
+            });
+            let _ = results;
+            stale = false;
+            for d in &state.diagnostics {
+                let code_part = d.code.as_deref()
+                    .map(|c| format!("[{}/{}]", d.tool, c))
+                    .unwrap_or_else(|| format!("[{}]", d.tool));
+                println!(
+                    "{}:{}:{}: {} {} {}",
+                    d.file.display(), d.line, d.col, d.severity, code_part, d.message
+                );
+            }
+            let elapsed = t0.elapsed().as_secs_f64();
+            println!(
+                "{} errors, {} warnings ({} files checked, {:.1}s)",
+                state.summary.errors,
+                state.summary.warnings,
+                changed.len(),
+                elapsed,
+            );
+            if let Err(e) = write_state(&state_file, &state) {
+                eprintln!("pulci: failed to write initial state: {e}");
+            }
+        }
+    }
 
     loop {
         match rx.recv_timeout(Duration::from_millis(100)) {

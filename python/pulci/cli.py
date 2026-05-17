@@ -135,10 +135,22 @@ def status(
     state_file = pathlib.Path(path) / ".pulci" / "state.json"
 
     if not state_file.exists():
-        if json_output:
-            typer.echo(json.dumps({"status": "not_running", "hint": "run `pulci start` first"}))
+        hb = _heartbeat_info(state_file.parent)
+        if hb["daemon_status"] == "alive":
+            payload = {
+                "status": "running_no_checks_yet",
+                "daemon_status": "alive",
+                "hint": "daemon is running — touch any .py file to trigger the first check",
+            }
+            if json_output:
+                typer.echo(json.dumps(payload))
+            else:
+                typer.echo("Daemon is running. Touch any .py file to trigger the first check.")
         else:
-            typer.echo("No state available. Run `pulci start` first.", err=True)
+            if json_output:
+                typer.echo(json.dumps({"status": "not_running", "hint": "run `pulci start` first"}))
+            else:
+                typer.echo("No state available. Run `pulci start` first.", err=True)
         raise typer.Exit(code=0)
 
     raw = state_file.read_text()
