@@ -100,12 +100,17 @@ pulci is active. You'll pay cold start each time and the daemon's
 cache will be redundant. The whole point is that pulci already ran
 them in the background while you were thinking.
 
-## Schemas
+## Schemas and stable contracts
 
 Machine-readable contracts for both the state file and the config:
 
 - [`schemas/state.v1.schema.json`](../schemas/state.v1.schema.json) — full schema for `.pulci/state.json`
 - [`schemas/pulci-toml.schema.json`](../schemas/pulci-toml.schema.json) — full schema for `pulci.toml`
+
+Stable behavioural contracts — atomic state writes, monotonic `state_version`,
+single-instance daemon, exit codes, schema versioning policy — are documented
+in [`docs/ARCHITECTURE.md`](ARCHITECTURE.md#invariants-and-guarantees). Read
+that section if you are building an integration that depends on any of them.
 
 ## pulci_status tool (MCP)
 

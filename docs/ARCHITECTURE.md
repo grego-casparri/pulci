@@ -125,6 +125,84 @@ cycle; if it changes (e.g. the user ran `pip install --upgrade ruff`), the
 `stale` flag in the next `state.json` write is set to `true` so consumers
 know a tool upgrade occurred mid-session.
 
+## Invariants and guarantees
+
+The contracts below are stable across patch releases within a `schema_version`.
+Code that touches the daemon, the state file, or the public CLI surfaces must
+preserve them. Most are also enforced by tests; the rest are enforced by
+review.
+
+**Atomic state write.** `.pulci/state.json` is written by serializing the full
+state to `state.json.tmp` and then `rename(2)` into place. POSIX guarantees the
+rename is atomic on the same filesystem, so a reader sees either the previous
+complete state or the new complete state — never a partial. There is no
+incremental update path; every write is a whole `State`.
+
+**Monotonic `state_version`.** Incremented exactly once per `build_state` call,
+which happens exactly once per check pass. The counter never decreases within
+the lifetime of a daemon. Consumers can use `state_version > last_seen` as the
+sole signal that a new result is available (this is the contract that backs
+`pulci_status(since_version=...)` per D-013).
+
+**Single instance per project.** `pulci start` acquires an advisory exclusive
+lock on `.pulci/daemon.lock` (`fs2::FileExt::try_lock_exclusive`) before any
+other I/O — before the heartbeat thread, before the watcher, before the
+initial scan. A second `pulci start` against the same project root fails fast
+with a non-zero exit code and a message that names the lock path. The kernel
+releases the lock on process exit, including SIGKILL.
+
+**Paralelismo.** The tokio runtime is built with `worker_threads(4)`. Hooks
+are CPU-light and subprocess-bound — each hook is one `spawn_blocking` task
+shelling out to ruff/ty/pytest/clippy. Adding more workers doesn't help
+because the bottleneck is the subprocess, not the runtime. This constant
+changes only with a benchmark.
+
+**Debounce window.** Events received within 50 ms of the first event in a
+batch are coalesced into a single check pass. The window covers the
+typical "save + auto-format" double-write of modern editors without
+introducing perceptible latency on a single edit. Hardcoded.
+
+**Hook timeout.** Each hook subprocess is killed and reported as a
+`tool_errors` entry if it does not exit within `DEFAULT_HOOK_TIMEOUT`
+(120 s). Generous enough that legitimate slow runs (cold pytest, first-run
+cargo clippy) never trip it; tight enough that a true hang surfaces within
+two minutes instead of freezing the daemon indefinitely.
+
+**Exit codes (public contract).**
+
+| Command         | Exit | Meaning                                           |
+|-----------------|------|---------------------------------------------------|
+| `pulci start`   | 0    | Stopped cleanly (Ctrl-C, graceful shutdown)       |
+| `pulci start`   | ≠0   | Lock contention, irrecoverable error              |
+| `pulci status`  | 0    | No daemon running, OR daemon clean (no errors)    |
+| `pulci status`  | 1    | `summary.errors > 0`                              |
+| `pulci status`  | 2    | `state.json` is corrupted                         |
+| `pulci mcp`     | 0    | Server stopped cleanly                            |
+| `pulci mcp`     | ≠0   | Irrecoverable                                     |
+
+`tool_errors` alone does NOT flip `pulci status` to 1. The decision to act on
+a missing verdict is the agent's, not the daemon's.
+
+**Schema versioning.** `state.v1.schema.json` is at `schema_version=1`.
+Breaking changes (field renames, type changes, removals, semantic shifts)
+bump to `2`. Purely additive fields are allowed within version `1` and use
+`#[serde(default)]` in the Rust types so historical `state.json` files
+deserialize cleanly. Consumers ignore unknown fields by convention.
+
+**Watcher ignores.** The watcher skips these directories unconditionally:
+`.git`, `.pulci`, `.ruff_cache`, `.pytest_cache`, `__pycache__`,
+`node_modules`, `.venv`, `target`, and any path starting with
+`pytest-cache-files-`. Users can add more via `[watch] exclude` in
+`pulci.toml`. The event loop further restricts events to `.py` files
+(and `.rs` when `[hooks] clippy = true`) before invoking hooks.
+
+**Rescan on overflow.** If the underlying file-watcher backend reports lost
+events (Linux: inotify queue overflow surfaced as `Flag::Rescan` per notify
+crate), the daemon does a full `collect_py_files` scan equivalent to the
+startup scan. The `FileCache` then filters down to actually-modified files.
+This is defense in depth against silent staleness — see the failure-modes
+audit for empirical frequency notes.
+
 ## Out of scope (deliberately)
 
 These are real problems, but not pulci's:
