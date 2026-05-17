@@ -6,6 +6,19 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `pulci start` now propagates SIGTERM to active hook subprocesses (ruff, ty,
+  pytest, clippy) before exiting, so external `kill <pid>` / systemd / supervisor
+  scripts no longer leave orphan hook processes behind for up to the per-hook
+  timeout window. Implementation: `pulci-core::hooks` maintains a global
+  registry of active hook PIDs; the daemon installs a SIGTERM handler
+  (via `signal-hook`, Unix-only) that drains the registry with `libc::kill`
+  and lets the main loop exit cleanly. The daemon prints `{"event":"stopped"}`
+  in `--agent` mode or `Stopped (SIGTERM received).` in human mode before
+  exiting with status 0. Terminal Ctrl-C was already handled by the kernel
+  delivering SIGINT to the foreground process group; this fix is specifically
+  for external SIGTERM where only the daemon receives the signal.
+
 ## [0.0.3] - 2026-05-17
 
 Robustness pass focused on failure modes an agent would notice but a

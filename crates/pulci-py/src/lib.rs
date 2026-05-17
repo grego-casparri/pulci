@@ -104,6 +104,30 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
     }
     let _lock_file = lock_file;
 
+    // Install a SIGTERM handler that kills active hook subprocesses before the
+    // daemon exits. Terminal Ctrl-C is already handled by the kernel sending
+    // SIGINT to the foreground process group (children die alongside the
+    // daemon), so this is specifically for external `kill <pid>`, systemd,
+    // and supervising scripts where only the daemon receives the signal.
+    let shutdown = Arc::new(AtomicBool::new(false));
+    #[cfg(unix)]
+    {
+        use signal_hook::consts::SIGTERM;
+        use signal_hook::iterator::Signals;
+        let mut signals = Signals::new([SIGTERM]).map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "failed to register SIGTERM handler: {e}"
+            ))
+        })?;
+        let shutdown_clone = Arc::clone(&shutdown);
+        std::thread::spawn(move || {
+            for _ in signals.forever() {
+                shutdown_clone.store(true, Ordering::Relaxed);
+                pulci_core::hooks::kill_all_active_hooks();
+            }
+        });
+    }
+
     let config = load_config(&project_root).unwrap_or_else(|e| {
         eprintln!("pulci: warning: failed to load pulci.toml ({e}), using defaults");
         Default::default()
@@ -256,6 +280,15 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
     }
 
     loop {
+        if shutdown.load(Ordering::Relaxed) {
+            if agent {
+                println!("{{\"event\":\"stopped\"}}");
+            } else {
+                println!("Stopped (SIGTERM received).");
+            }
+            let _ = std::io::stdout().flush();
+            break;
+        }
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(first) => {
                 let mut paths: HashSet<PathBuf> = HashSet::new();
