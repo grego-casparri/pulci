@@ -4,34 +4,50 @@ Tests for the pulci MCP server tool and info helper.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import pathlib
 import sys
+import threading
+import time
 
 import pytest
 from pulci.mcp_server import print_mcp_info, pulci_status
 
 
+def _run(coro):
+    """
+    Run a coroutine synchronously (no pytest-asyncio dependency).
+    """
+    return asyncio.run(coro)
+
+
+def _write_state(state_dir: pathlib.Path, state: dict) -> None:
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "state.json").write_text(json.dumps(state))
+
+
+MINIMAL_STATE = {
+    "schema_version": 1,
+    "state_version": 1,
+    "timestamp": "2026-05-17T10:00:00Z",
+    "summary": {"errors": 0, "warnings": 0, "checks_run": 2, "stale": False},
+    "tools": [],
+    "diagnostics": [],
+}
+
+
 def test_pulci_status_no_daemon(tmp_path: pathlib.Path) -> None:
-    result = pulci_status(str(tmp_path))
+    result = _run(pulci_status(str(tmp_path)))
     assert result["status"] == "not_running"
     assert "hint" in result
 
 
 def test_pulci_status_returns_state(tmp_path: pathlib.Path) -> None:
-    state = {
-        "schema_version": 1,
-        "timestamp": "2026-05-17T10:00:00Z",
-        "summary": {"errors": 0, "warnings": 0, "checks_run": 2, "stale": False},
-        "tools": [],
-        "diagnostics": [],
-    }
-    state_dir = tmp_path / ".pulci"
-    state_dir.mkdir()
-    (state_dir / "state.json").write_text(json.dumps(state))
-
-    result = pulci_status(str(tmp_path))
+    _write_state(tmp_path / ".pulci", MINIMAL_STATE)
+    result = _run(pulci_status(str(tmp_path)))
     assert result["schema_version"] == 1
+    assert result["state_version"] == 1
     assert result["summary"]["errors"] == 0
 
 
@@ -40,7 +56,7 @@ def test_pulci_status_corrupted_state(tmp_path: pathlib.Path) -> None:
     state_dir.mkdir()
     (state_dir / "state.json").write_text("{ not valid json")
 
-    result = pulci_status(str(tmp_path))
+    result = _run(pulci_status(str(tmp_path)))
     assert result["status"] == "error"
     assert "hint" in result
 
@@ -85,3 +101,44 @@ def test_mcp_info_command_is_pulci_bin(capsys: pytest.CaptureFixture) -> None:
     command = config["mcpServers"]["pulci"]["command"]
     expected = str(pathlib.Path(sys.executable).parent / "pulci")
     assert command == expected
+
+
+def test_wait_for_returns_immediately_when_version_advanced(tmp_path: pathlib.Path) -> None:
+    state = {**MINIMAL_STATE, "state_version": 5}
+    _write_state(tmp_path / ".pulci", state)
+
+    result = _run(pulci_status(str(tmp_path), since_version=3, timeout_ms=1000))
+    assert result.get("state_version") == 5
+
+
+def test_wait_for_times_out_when_version_not_advanced(tmp_path: pathlib.Path) -> None:
+    state = {**MINIMAL_STATE, "state_version": 2}
+    _write_state(tmp_path / ".pulci", state)
+
+    # since_version == current version → no new result → timeout
+    result = _run(pulci_status(str(tmp_path), since_version=2, timeout_ms=200))
+    assert result["status"] == "timeout"
+    assert "hint" in result
+
+
+def test_wait_for_detects_version_bump_mid_wait(tmp_path: pathlib.Path) -> None:
+    state_dir = tmp_path / ".pulci"
+    _write_state(state_dir, {**MINIMAL_STATE, "state_version": 1})
+
+    def bump_after_delay() -> None:
+        time.sleep(0.15)
+        _write_state(state_dir, {**MINIMAL_STATE, "state_version": 2})
+
+    t = threading.Thread(target=bump_after_delay, daemon=True)
+    t.start()
+
+    result = _run(pulci_status(str(tmp_path), since_version=1, timeout_ms=2000))
+    t.join(timeout=1)
+
+    assert result.get("state_version") == 2
+
+
+def test_wait_for_no_daemon_during_wait(tmp_path: pathlib.Path) -> None:
+    # State file missing from the start with wait params → not_running
+    result = _run(pulci_status(str(tmp_path), since_version=0, timeout_ms=200))
+    assert result["status"] == "not_running"

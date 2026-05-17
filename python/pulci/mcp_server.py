@@ -6,9 +6,11 @@ Run with: pulci mcp
 
 from __future__ import annotations
 
+import asyncio
 import json
 import pathlib
 import sys
+import time
 
 from mcp.server.fastmcp import FastMCP
 
@@ -18,25 +20,16 @@ mcp = FastMCP(
         "pulci is a continuous quality gate daemon for Python projects. "
         "Use pulci_status to get the current state of ruff, ty, and pytest "
         "checks after each file edit. Never invoke ruff/ty/pytest directly "
-        "while pulci is active — it already ran them in the background."
+        "while pulci is active — it already ran them in the background. "
+        "For causal synchronisation after an edit, pass wait_for_file and "
+        "since_version so the tool blocks until a fresh result is ready."
     ),
 )
 
+_POLL_INTERVAL = 0.05  # seconds between state.json reads when waiting
 
-@mcp.tool()
-def pulci_status(path: str = ".") -> dict:
-    """
-    Return the current quality gate state for the project at path.
 
-    Returns a state object with schema_version, summary, tools, and diagnostics.
-    If the daemon is not running, returns {"status": "not_running", "hint": "..."}.
-    """
-    state_file = pathlib.Path(path).resolve() / ".pulci" / "state.json"
-    if not state_file.exists():
-        return {
-            "status": "not_running",
-            "hint": f"run `pulci start {path}` in your terminal to start the daemon",
-        }
+def _read_state(state_file: pathlib.Path) -> dict:
     try:
         return json.loads(state_file.read_text())
     except json.JSONDecodeError:
@@ -44,6 +37,71 @@ def pulci_status(path: str = ".") -> dict:
             "status": "error",
             "hint": "state.json is corrupted — stop and restart `pulci start`",
         }
+
+
+@mcp.tool()
+async def pulci_status(
+    path: str = ".",
+    wait_for_file: str | None = None,
+    since_version: int | None = None,
+    timeout_ms: int = 5000,
+) -> dict:
+    """
+    Return the current quality gate state for the project at path.
+
+    Returns a state object with schema_version, state_version, summary,
+    tools, and diagnostics.
+
+    If the daemon is not running, returns {"status": "not_running", "hint": "..."}.
+
+    Causal synchronisation (D-013):
+      - wait_for_file: block until a result that covers this file is available.
+      - since_version: the state_version already seen; wait until state_version > since_version.
+      - timeout_ms: max wait in milliseconds (default 5000). Returns {"status": "timeout"}
+        if the daemon does not produce a new result in time.
+
+    Typical agent loop:
+      v = (await pulci_status()).get("state_version", 0)
+      # edit foo.py
+      result = await pulci_status(wait_for_file="foo.py", since_version=v)
+    """
+    state_file = pathlib.Path(path).resolve() / ".pulci" / "state.json"
+
+    if not state_file.exists():
+        return {
+            "status": "not_running",
+            "hint": f"run `pulci start {path}` in your terminal to start the daemon",
+        }
+
+    # Fast path — no synchronisation requested.
+    if wait_for_file is None and since_version is None:
+        return _read_state(state_file)
+
+    # Blocking path — wait until state_version > since_version.
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    baseline = since_version if since_version is not None else -1
+
+    while True:
+        if not state_file.exists():
+            return {
+                "status": "not_running",
+                "hint": f"run `pulci start {path}` in your terminal to start the daemon",
+            }
+        state = _read_state(state_file)
+        current_version = state.get("state_version", 0)
+        if current_version > baseline:
+            return state
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {
+                "status": "timeout",
+                "hint": (
+                    "The daemon did not produce a new result within "
+                    f"{timeout_ms}ms. Is `pulci start` running?"
+                ),
+            }
+        await asyncio.sleep(min(_POLL_INTERVAL, remaining))
 
 
 def print_mcp_info(path: str = ".") -> None:

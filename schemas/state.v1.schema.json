@@ -4,13 +4,18 @@
   "title": "pulci state",
   "description": "Schema for .pulci/state.json written by pulci start.",
   "type": "object",
-  "required": ["schema_version", "timestamp", "summary", "diagnostics", "tools"],
+  "required": ["schema_version", "state_version", "timestamp", "summary", "diagnostics", "tools"],
   "additionalProperties": false,
   "properties": {
     "schema_version": {
       "type": "integer",
       "const": 1,
       "description": "Schema version. Will be bumped on breaking changes."
+    },
+    "state_version": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonically increasing counter incremented on every atomic write. Agents use this with wait_for_file/since_version in pulci_status to detect new results without polling."
     },
     "timestamp": {
       "type": "string",

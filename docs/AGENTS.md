@@ -37,6 +37,7 @@ This returns the aggregated diagnostics. Shape:
 ```json
 {
   "schema_version": 1,
+  "state_version": 7,
   "timestamp": "2026-05-15T14:23:01Z",
   "summary": {
     "errors": 2,
@@ -98,6 +99,33 @@ If the daemon is not running, the tool returns:
 
 This is **not** an error — handle it by informing the user to start the daemon.
 The tool never returns `isError: true` for a missing daemon.
+
+### Causal synchronisation: wait_for_file + since_version
+
+`pulci_status` accepts optional parameters to avoid polling or fixed sleeps:
+
+| Parameter        | Type         | Default | Description                                                        |
+|------------------|--------------|---------|--------------------------------------------------------------------|
+| `wait_for_file`  | `str \| None` | `None`  | Block until a result covering this file is available.              |
+| `since_version`  | `int \| None` | `None`  | Block until `state_version > since_version`.                       |
+| `timeout_ms`     | `int`        | `5000`  | Max wait in ms. Returns `{"status": "timeout"}` if exceeded.       |
+
+**Recommended agent loop:**
+
+```python
+# 1. Get current version before your edit
+v = (await pulci_status()).get("state_version", 0)
+
+# 2. Make your edit
+# edit foo.py ...
+
+# 3. Wait for the daemon to process it — zero sleep, zero polling
+result = await pulci_status(wait_for_file="foo.py", since_version=v)
+# result is fresh state; read diagnostics and decide
+```
+
+`since_version` is the key to causal correctness: it guarantees you wait for
+a result produced *after* your edit, even if the daemon is very fast.
 
 ## Adapter version compatibility
 

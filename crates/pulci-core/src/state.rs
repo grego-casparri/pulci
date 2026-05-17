@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -8,6 +9,13 @@ use crate::hooks::{Diagnostic, Severity};
 use crate::orchestrator::RunResult;
 
 pub const SCHEMA_VERSION: u32 = 1;
+
+static STATE_VERSION: AtomicU64 = AtomicU64::new(0);
+
+/// Return the next monotonic state version. Each call increments the counter.
+pub fn next_state_version() -> u64 {
+    STATE_VERSION.fetch_add(1, Ordering::SeqCst)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolInfo {
@@ -21,6 +29,11 @@ pub struct ToolInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct State {
     pub schema_version: u32,
+    /// Monotonically increasing counter incremented on every atomic write.
+    /// Agents use this to detect that a new result was produced since their
+    /// last read (see D-013: wait_for + since_version synchronisation).
+    #[serde(default)]
+    pub state_version: u64,
     pub timestamp: String,
     pub summary: Summary,
     pub diagnostics: Vec<Diagnostic>,
@@ -60,6 +73,7 @@ pub fn build_state(results: &[RunResult], tools: Vec<ToolInfo>, stale: bool) -> 
 
     State {
         schema_version: SCHEMA_VERSION,
+        state_version: next_state_version(),
         timestamp: now_iso8601(),
         summary: Summary {
             errors,

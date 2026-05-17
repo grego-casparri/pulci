@@ -19,6 +19,7 @@ runner = CliRunner()
 
 MINIMAL_STATE = {
     "schema_version": 1,
+    "state_version": 1,
     "timestamp": "2026-05-16T01:00:00Z",
     "summary": {"errors": 1, "warnings": 0, "checks_run": 2, "stale": False},
     "diagnostics": [
