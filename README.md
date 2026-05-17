@@ -175,7 +175,7 @@ Schema version is `1` and will be bumped on breaking changes.
 
 - Full schema: [`schemas/state.v1.schema.json`](schemas/state.v1.schema.json)
 - Config schema: [`schemas/pulci-toml.schema.json`](schemas/pulci-toml.schema.json)
-- Human documentation: [`docs/AGENTS.md`](docs/AGENTS.md)
+- Agent documentation: [`docs/AGENTS.md`](docs/AGENTS.md)
 
 ## Contributing
 
