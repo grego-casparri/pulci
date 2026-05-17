@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import json
 import pathlib
-from typing import Annotated
+from typing import Annotated, Literal
 
 import typer
 
 from pulci import __version__, _native
+from pulci.mcp_server import mcp as _mcp_server
+from pulci.mcp_server import print_mcp_info
 
 
 def _version_callback(value: bool) -> None:
@@ -25,6 +27,14 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+
+_mcp_app = typer.Typer(
+    name="mcp",
+    help="Run the pulci MCP server for Claude Desktop, Cursor, and compatible hosts.",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+app.add_typer(_mcp_app)
 
 
 @app.callback()
@@ -146,6 +156,40 @@ def status(
 
     if summary.get("errors", 0) > 0:
         raise typer.Exit(code=1)
+
+
+@_mcp_app.callback()
+def mcp_cmd(
+    ctx: typer.Context,
+    path: Annotated[str, typer.Argument(help="Project root to serve state from.")] = ".",
+    transport: Annotated[
+        Literal["stdio"],
+        typer.Option("--transport", help="MCP transport protocol."),
+    ] = "stdio",
+) -> None:
+    """
+    Start the pulci MCP server (stdio).
+
+    Exposes the pulci_status tool to any MCP-compatible host
+    (Claude Desktop, Cursor, Claude Code). Run `pulci mcp info` to get
+    the config block to paste into your host.
+    """
+    if ctx.invoked_subcommand is None:
+        import os
+
+        if path != ".":
+            os.chdir(path)
+        _mcp_server.run(transport=transport)
+
+
+@_mcp_app.command("info")
+def mcp_info(
+    path: Annotated[str, typer.Argument(help="Project root (embedded in config).")] = ".",
+) -> None:
+    """
+    Print the MCP config block to paste into Claude Desktop or Cursor.
+    """
+    print_mcp_info(path)
 
 
 if __name__ == "__main__":

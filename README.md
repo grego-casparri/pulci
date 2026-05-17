@@ -37,6 +37,32 @@ pulci does **not** replace any of these. It fills the empty quadrant.
 
 ![pulci watching a project for changes](demo/pulci.gif)
 
+## MCP server
+
+pulci ships an MCP server for Claude Desktop, Cursor, and any MCP-compatible host.
+
+```bash
+pulci mcp info          # prints the config block to paste into your host
+pulci mcp               # starts the server (stdio)
+pulci mcp /path/to/project  # explicit project root
+```
+
+`pulci mcp info` output (paste into `claude_desktop_config.json` or `.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "pulci": {
+      "command": "/path/to/.venv/bin/pulci",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Once configured, the host exposes the `pulci_status` tool — agents call it instead of
+invoking ruff/ty/pytest directly.
+
 ## For AI agents
 
 If you are an AI coding agent, start here: **[docs/AGENTS.md](docs/AGENTS.md)**

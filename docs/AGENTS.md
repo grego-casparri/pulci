@@ -6,6 +6,17 @@ is what you want.
 
 > This document describes the pulci contract as of **v0.0.1** (schema_version 1).
 
+## MCP setup (recommended)
+
+If your host supports MCP (Claude Desktop, Cursor, Claude Code), run:
+
+```bash
+pulci mcp info
+```
+
+Paste the printed config into your host's MCP config file. The host will expose
+the `pulci_status` tool automatically — no manual CLI calls needed.
+
 ## The contract
 
 pulci runs as a daemon in the project root. It watches the filesystem
@@ -74,6 +85,19 @@ Machine-readable contracts for both the state file and the config:
 
 - [`schemas/state.v1.schema.json`](../schemas/state.v1.schema.json) — full schema for `.pulci/state.json`
 - [`schemas/pulci-toml.schema.json`](../schemas/pulci-toml.schema.json) — full schema for `pulci.toml`
+
+## pulci_status tool (MCP)
+
+When using pulci via MCP, call `pulci_status` after each edit instead of
+`pulci status --json`. The tool returns the same schema as `state.json`.
+
+If the daemon is not running, the tool returns:
+```json
+{"status": "not_running", "hint": "run pulci start in your project root"}
+```
+
+This is **not** an error — handle it by informing the user to start the daemon.
+The tool never returns `isError: true` for a missing daemon.
 
 ## Adapter version compatibility
 
