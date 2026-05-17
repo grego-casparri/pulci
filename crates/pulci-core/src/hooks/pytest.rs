@@ -8,6 +8,9 @@ pub struct PytestAdapter {
     invocation: Vec<String>,
     project_root: PathBuf,
     timeout: Duration,
+    /// User-configured glob-like templates with `{stem}` substitution.
+    /// Empty falls back to the historical `tests/test_{stem}.py` heuristic.
+    test_patterns: Vec<String>,
 }
 
 impl PytestAdapter {
@@ -15,11 +18,13 @@ impl PytestAdapter {
         resolved: &crate::resolver::ResolvedTool,
         project_root: PathBuf,
         timeout: Duration,
+        test_patterns: Vec<String>,
     ) -> Self {
         Self {
             invocation: resolved.invocation.clone(),
             project_root,
             timeout,
+            test_patterns,
         }
     }
 }
@@ -32,7 +37,7 @@ impl Hook for PytestAdapter {
     fn run(&self, files: &[PathBuf]) -> anyhow::Result<Vec<Diagnostic>> {
         let test_files: Vec<PathBuf> = files
             .iter()
-            .filter_map(|f| find_test_file(f))
+            .flat_map(|f| find_test_files(f, &self.test_patterns))
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .filter(|p| self.project_root.join(p).exists())
@@ -62,20 +67,32 @@ impl Hook for PytestAdapter {
     }
 }
 
-/// Map a source file to its corresponding test file.
+/// Map a source file to its corresponding test file(s).
 ///
-/// `python/pulci/foo.py` → `tests/test_foo.py`
-/// `tests/test_foo.py`   → `tests/test_foo.py` (already a test file)
-/// `src/main.rs`         → `None` (non-Python files are ignored)
-pub(crate) fn find_test_file(source: &Path) -> Option<PathBuf> {
-    if source.extension()? != "py" {
-        return None;
+/// Non-Python files yield an empty vec. A source whose stem already starts
+/// with `test_` is treated as a test file and returned as-is. Otherwise the
+/// configured `test_patterns` are tried in order; each is rendered by
+/// substituting `{stem}` with the source's file stem. An empty `test_patterns`
+/// falls back to the historical heuristic `tests/test_{stem}.py`.
+///
+/// Caller filters the returned paths by existence on disk before invoking pytest.
+pub(crate) fn find_test_files(source: &Path, test_patterns: &[String]) -> Vec<PathBuf> {
+    if source.extension().map(|e| e != "py").unwrap_or(true) {
+        return Vec::new();
     }
-    let stem = source.file_stem()?.to_str()?;
+    let Some(stem) = source.file_stem().and_then(|s| s.to_str()) else {
+        return Vec::new();
+    };
     if stem.starts_with("test_") {
-        return Some(source.to_path_buf());
+        return vec![source.to_path_buf()];
     }
-    Some(PathBuf::from("tests").join(format!("test_{stem}.py")))
+    if test_patterns.is_empty() {
+        return vec![PathBuf::from("tests").join(format!("test_{stem}.py"))];
+    }
+    test_patterns
+        .iter()
+        .map(|p| PathBuf::from(p.replace("{stem}", stem)))
+        .collect()
 }
 
 /// Parse `pytest --tb=no -q` stdout into diagnostics.
@@ -146,28 +163,69 @@ FAILED tests/test_watcher.py::test_watch - RuntimeError: timeout
     }
 
     #[test]
-    fn find_test_file_for_source() {
+    fn find_test_files_default_heuristic_for_source() {
+        let result = find_test_files(Path::new("python/pulci/watcher.py"), &[]);
+        assert_eq!(result, vec![PathBuf::from("tests/test_watcher.py")]);
+    }
+
+    #[test]
+    fn find_test_files_returns_source_when_already_a_test_file() {
+        let result = find_test_files(Path::new("tests/test_foo.py"), &[]);
+        assert_eq!(result, vec![PathBuf::from("tests/test_foo.py")]);
+    }
+
+    #[test]
+    fn find_test_files_test_self_detection_ignores_patterns() {
+        // A file that IS already a test file is returned as-is regardless of
+        // what patterns are configured — the user-configured patterns are for
+        // source→test mapping, not test→test rewriting.
+        let patterns = vec!["different/place/{stem}.py".to_string()];
+        let result = find_test_files(Path::new("tests/test_foo.py"), &patterns);
+        assert_eq!(result, vec![PathBuf::from("tests/test_foo.py")]);
+    }
+
+    #[test]
+    fn find_test_files_ignores_rust() {
+        assert!(find_test_files(Path::new("src/main.rs"), &[]).is_empty());
+    }
+
+    #[test]
+    fn find_test_files_ignores_non_python() {
+        assert!(find_test_files(Path::new("Makefile"), &[]).is_empty());
+    }
+
+    #[test]
+    fn find_test_files_substitutes_stem_in_each_pattern() {
+        let patterns = vec![
+            "tests/test_{stem}.py".to_string(),
+            "test/test_{stem}.py".to_string(),
+            "tests/unit/test_{stem}.py".to_string(),
+        ];
+        let result = find_test_files(Path::new("src/foo.py"), &patterns);
         assert_eq!(
-            find_test_file(Path::new("python/pulci/watcher.py")),
-            Some(PathBuf::from("tests/test_watcher.py"))
+            result,
+            vec![
+                PathBuf::from("tests/test_foo.py"),
+                PathBuf::from("test/test_foo.py"),
+                PathBuf::from("tests/unit/test_foo.py"),
+            ]
         );
     }
 
     #[test]
-    fn find_test_file_for_existing_test() {
-        assert_eq!(
-            find_test_file(Path::new("tests/test_foo.py")),
-            Some(PathBuf::from("tests/test_foo.py"))
-        );
+    fn find_test_files_pattern_without_stem_placeholder_is_literal() {
+        // A template without {stem} produces the same path for every source.
+        // Allowed (no error), but caller's existence filter sorts it out.
+        let patterns = vec!["tests/conftest.py".to_string()];
+        let result = find_test_files(Path::new("src/foo.py"), &patterns);
+        assert_eq!(result, vec![PathBuf::from("tests/conftest.py")]);
     }
 
     #[test]
-    fn find_test_file_ignores_rust() {
-        assert!(find_test_file(Path::new("src/main.rs")).is_none());
-    }
-
-    #[test]
-    fn find_test_file_ignores_non_python() {
-        assert!(find_test_file(Path::new("Makefile")).is_none());
+    fn find_test_files_singular_test_dir_layout() {
+        // Regression-style verification for the "tests vs test" gripe.
+        let patterns = vec!["test/test_{stem}.py".to_string()];
+        let result = find_test_files(Path::new("src/calculator.py"), &patterns);
+        assert_eq!(result, vec![PathBuf::from("test/test_calculator.py")]);
     }
 }

@@ -248,7 +248,12 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         let r = pulci_core::resolver::resolve_tool("pytest", &project_root, config.tools.pytest.as_deref())
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         tool_infos.push(resolved_to_info(&r));
-        hook_list.push(Arc::new(PytestAdapter::new(&r, project_root.clone(), hook_timeout)));
+        hook_list.push(Arc::new(PytestAdapter::new(
+            &r,
+            project_root.clone(),
+            hook_timeout,
+            config.hooks.pytest_test_patterns.clone(),
+        )));
     }
     if config.hooks.clippy {
         let r = pulci_core::resolver::resolve_tool("cargo", &project_root, None)

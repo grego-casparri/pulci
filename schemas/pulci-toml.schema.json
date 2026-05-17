@@ -40,6 +40,12 @@
           "type": "integer",
           "minimum": 1,
           "description": "Per-hook subprocess wall-clock timeout in seconds. Applies uniformly to every enabled hook. Omit (or null) to use the default of 120. Useful for projects whose pytest suite or cold cargo clippy legitimately exceeds 120s."
+        },
+        "pytest_test_patterns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Templates pulci uses to map a changed source file to its test file(s). `{stem}` is substituted with the source's file stem. Each existing match is fed to pytest. Empty list (default) uses the historical heuristic `tests/test_{stem}.py`. Example: [\"tests/test_{stem}.py\", \"test/test_{stem}.py\", \"tests/unit/test_{stem}.py\"]."
         }
       }
     },

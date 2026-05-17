@@ -41,6 +41,12 @@ pub struct HooksConfig {
     /// every enabled hook. `None` falls back to `DEFAULT_HOOK_TIMEOUT` (120 s).
     /// Useful when a real test suite legitimately runs longer than the default.
     pub timeout_secs: Option<u64>,
+    /// Templates pulci uses to map a changed source file to its test file(s).
+    /// Each template can contain `{stem}` which is replaced by the source's
+    /// file stem. Empty list (the default) keeps the historical heuristic
+    /// `tests/test_{stem}.py`. Patterns are tried in order; every existing
+    /// match is fed to pytest.
+    pub pytest_test_patterns: Vec<String>,
 }
 
 impl Default for HooksConfig {
@@ -52,6 +58,7 @@ impl Default for HooksConfig {
             pytest: false,
             clippy: false,
             timeout_secs: None,
+            pytest_test_patterns: Vec::new(),
         }
     }
 }
@@ -217,6 +224,30 @@ mod tests {
         let cfg = load_config(&dir).unwrap();
         assert!(!cfg.hooks.ruff);
         assert!(cfg.hooks.ruff_format);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn pytest_test_patterns_defaults_empty() {
+        let dir = write_toml("");
+        let cfg = load_config(&dir).unwrap();
+        assert!(cfg.hooks.pytest_test_patterns.is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn pytest_test_patterns_parsed_when_present() {
+        let dir = write_toml(
+            "[hooks]\npytest_test_patterns = [\"test/test_{stem}.py\", \"tests/unit/test_{stem}.py\"]\n",
+        );
+        let cfg = load_config(&dir).unwrap();
+        assert_eq!(
+            cfg.hooks.pytest_test_patterns,
+            vec![
+                "test/test_{stem}.py".to_string(),
+                "tests/unit/test_{stem}.py".to_string()
+            ]
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

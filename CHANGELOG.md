@@ -7,6 +7,14 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `[hooks] pytest_test_patterns` in `pulci.toml`: list of templates pulci
+  uses to map a changed source file to its test file(s). Each template can
+  contain `{stem}`, replaced with the source's file stem. Every existing
+  match is fed to pytest. Empty list (default) keeps the historical heuristic
+  `tests/test_{stem}.py`. Unblocks projects with non-standard test layouts —
+  singular `test/`, nested `tests/unit/`, etc. — without losing the selective
+  pytest execution model. Source files that are already test files
+  (`test_*.py`) are returned as-is regardless of patterns.
 - `[hooks] ruff_format = true` enables a new adapter that runs
   `ruff format --check` on changed `.py` files. Files that would be
   reformatted appear as `error[ruff_format/format]` diagnostics in
