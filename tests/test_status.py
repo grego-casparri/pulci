@@ -182,3 +182,41 @@ def test_heartbeat_human_output_shows_dead_when_no_heartbeat() -> None:
         # No heartbeat file written → daemon dead
         result = runner.invoke(app, ["status"])
     assert "dead" in result.output
+
+
+def test_status_human_output_shows_tool_errors() -> None:
+    state = {
+        **MINIMAL_STATE,
+        "summary": {"errors": 0, "warnings": 0, "checks_run": 3, "stale": False},
+        "diagnostics": [],
+        "tool_errors": [
+            {"tool": "pytest", "message": "pytest timed out after 120s and was killed by pulci"}
+        ],
+    }
+    with runner.isolated_filesystem() as tmp:
+        write_state(pathlib.Path(tmp), state)
+        result = runner.invoke(app, ["status"])
+    assert result.exit_code == 0  # tool_errors alone do not flip exit code
+    assert "Tool errors" in result.output
+    assert "pytest" in result.output
+    assert "timed out" in result.output
+
+
+def test_status_json_includes_tool_errors_field() -> None:
+    state = {
+        **MINIMAL_STATE,
+        "tool_errors": [{"tool": "ty", "message": "ty crashed"}],
+    }
+    with runner.isolated_filesystem() as tmp:
+        write_state(pathlib.Path(tmp), state)
+        result = runner.invoke(app, ["status", "--json"])
+    parsed = json.loads(result.output)
+    assert parsed["tool_errors"] == [{"tool": "ty", "message": "ty crashed"}]
+
+
+def test_status_no_tool_errors_field_does_not_print_section() -> None:
+    # Backward compat: state without the field renders without the new section.
+    with runner.isolated_filesystem() as tmp:
+        write_state(pathlib.Path(tmp), MINIMAL_STATE)
+        result = runner.invoke(app, ["status"])
+    assert "Tool errors" not in result.output

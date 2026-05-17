@@ -4,7 +4,7 @@
   "title": "pulci state",
   "description": "Schema for .pulci/state.json written by pulci start.",
   "type": "object",
-  "required": ["schema_version", "state_version", "timestamp", "summary", "diagnostics", "tools"],
+  "required": ["schema_version", "state_version", "timestamp", "summary", "diagnostics", "tools", "tool_errors"],
   "additionalProperties": false,
   "properties": {
     "schema_version": {
@@ -66,6 +66,19 @@
             "description": "How the tool was resolved."
           },
           "path":    { "type": ["string", "null"], "description": "Absolute path if source is local-venv or system-path." }
+        }
+      }
+    },
+    "tool_errors": {
+      "type": "array",
+      "description": "Non-diagnostic hook failures (timeout, signal kill, parser crash). When non-empty, the listed tools produced no verdict for this check pass — agents should not treat absence of diagnostics from those tools as success.",
+      "items": {
+        "type": "object",
+        "required": ["tool", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "tool":    { "type": "string", "description": "Adapter name (ruff, ty, pytest, clippy)." },
+          "message": { "type": "string", "description": "Human-readable failure reason." }
         }
       }
     }

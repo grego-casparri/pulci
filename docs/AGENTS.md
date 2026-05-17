@@ -65,15 +65,35 @@ This returns the aggregated diagnostics. Shape:
 
 Severity values: `"error"`, `"warning"`, `"info"`. Most adapters emit only `"error"` and `"warning"`. Handle `"info"` gracefully (do not treat as an error).
 
+### `tool_errors` field
+
+A separate array next to `diagnostics`. Entries appear when a hook failed to
+produce a verdict — timed out, was killed by a signal, or crashed parsing its
+own output:
+
+```json
+"tool_errors": [
+  {"tool": "pytest", "message": "pytest timed out after 120s and was killed by pulci"}
+]
+```
+
+When `tool_errors` is non-empty, the listed tools did **not** check the current
+state. Absence of diagnostics from those tools is not a clean signal — it is
+"no verdict yet". Agents should either retry after a moment, or proceed
+explicitly aware that one tool's input is missing. `summary.checks_run` counts
+the tool as having executed, so do not use it as a success indicator on its own;
+read `tool_errors` first.
+
 ## Workflow
 
 After every edit you make, before deciding the next action:
 
 1. Call `pulci status --json`
 2. Parse the `summary` field
-3. If `summary.errors == 0 && summary.warnings == 0`, the change is clean
-4. Otherwise, the `diagnostics` array tells you exactly what's wrong
-5. Fix and loop
+3. Check `tool_errors` — if non-empty, one or more tools produced no verdict
+4. If `summary.errors == 0 && summary.warnings == 0 && tool_errors is empty`, the change is clean
+5. Otherwise, the `diagnostics` array tells you what's wrong (`tool_errors` tells you which tools never ran)
+6. Fix and loop
 
 Do **not** run `ruff check`, `ty check`, or `pytest` directly while
 pulci is active. You'll pay cold start each time and the daemon's

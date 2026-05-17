@@ -29,6 +29,17 @@ pub struct ToolInfo {
     pub path: Option<String>,
 }
 
+/// A non-diagnostic failure of a hook (timeout, missing binary, parser crash).
+///
+/// Surfaces in `state.json` so consumers can distinguish "the tool ran clean"
+/// from "the tool never produced a verdict". Diagnostics-as-data; the agent
+/// decides whether to retry, abort, or proceed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolError {
+    pub tool: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct State {
     pub schema_version: u32,
@@ -41,6 +52,11 @@ pub struct State {
     pub summary: Summary,
     pub diagnostics: Vec<Diagnostic>,
     pub tools: Vec<ToolInfo>,
+    /// Non-diagnostic hook failures (timeout, signal kill, parser crash).
+    /// `#[serde(default)]` so old state.json files without this field still
+    /// deserialize cleanly during the stale-detection read on daemon startup.
+    #[serde(default)]
+    pub tool_errors: Vec<ToolError>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +90,17 @@ pub fn build_state(results: &[RunResult], tools: Vec<ToolInfo>, stale: bool) -> 
         .filter(|d| d.severity == Severity::Warning)
         .count() as u32;
 
+    let mut tool_errors: Vec<ToolError> = results
+        .iter()
+        .filter_map(|r| {
+            r.error.as_ref().map(|msg| ToolError {
+                tool: r.tool.clone(),
+                message: msg.clone(),
+            })
+        })
+        .collect();
+    tool_errors.sort_by(|a, b| a.tool.cmp(&b.tool));
+
     State {
         schema_version: SCHEMA_VERSION,
         state_version: next_state_version(),
@@ -86,6 +113,7 @@ pub fn build_state(results: &[RunResult], tools: Vec<ToolInfo>, stale: bool) -> 
         },
         diagnostics: all_diagnostics,
         tools,
+        tool_errors,
     }
 }
 
@@ -310,6 +338,70 @@ mod tests {
         write_state(&path, &state).unwrap();
         let loaded = read_state(&path).unwrap();
         assert!(loaded.summary.stale);
+        fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn tool_errors_aggregated_from_failed_results() {
+        let r_ok = RunResult {
+            tool: "ruff".into(),
+            diagnostics: vec![],
+            error: None,
+        };
+        let r_err = RunResult {
+            tool: "pytest".into(),
+            diagnostics: vec![],
+            error: Some("pytest timed out after 120s and was killed by pulci".into()),
+        };
+        let state = build_state(&[r_ok, r_err], vec![], false);
+        assert_eq!(state.tool_errors.len(), 1);
+        assert_eq!(state.tool_errors[0].tool, "pytest");
+        assert!(state.tool_errors[0].message.contains("timed out"));
+        assert_eq!(state.summary.checks_run, 2);
+    }
+
+    #[test]
+    fn tool_errors_empty_when_all_results_ok() {
+        let state = build_state(&[make_result(1, 0)], vec![], false);
+        assert!(state.tool_errors.is_empty());
+    }
+
+    #[test]
+    fn tool_errors_sorted_alphabetically_for_stable_diff() {
+        let results = vec![
+            RunResult {
+                tool: "ty".into(),
+                diagnostics: vec![],
+                error: Some("ty crashed".into()),
+            },
+            RunResult {
+                tool: "clippy".into(),
+                diagnostics: vec![],
+                error: Some("cargo not found".into()),
+            },
+        ];
+        let state = build_state(&results, vec![], false);
+        assert_eq!(state.tool_errors[0].tool, "clippy");
+        assert_eq!(state.tool_errors[1].tool, "ty");
+    }
+
+    #[test]
+    fn state_without_tool_errors_field_still_deserializes() {
+        // Backward compat: a state.json written before tool_errors existed must
+        // still load on daemon startup (stale-detection read).
+        let path = tmp_state_path();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let legacy = r#"{
+            "schema_version": 1,
+            "state_version": 0,
+            "timestamp": "2026-05-01T00:00:00Z",
+            "summary": {"errors": 0, "warnings": 0, "checks_run": 0, "stale": false},
+            "diagnostics": [],
+            "tools": []
+        }"#;
+        fs::write(&path, legacy).unwrap();
+        let loaded = read_state(&path).unwrap();
+        assert!(loaded.tool_errors.is_empty());
         fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 }

@@ -37,6 +37,12 @@ Version scheme: [Semantic Versioning](https://semver.org/).
   regex, replacing the broken quiet-mode heuristic.
 
 ### Added
+- `tool_errors` field in `state.json`: aggregates non-diagnostic hook failures
+  (timeout, signal kill, parser crash) into a structured array. Closes the
+  residual gap from the per-hook timeout work — agents can now distinguish
+  "tool ran clean" from "tool never produced a verdict". `pulci status` human
+  output gains a "Tool errors" section when non-empty. Field is additive
+  (`#[serde(default)]` for backward compat on stale-detection reads).
 - Single-instance daemon: `pulci start` acquires an advisory exclusive lock on
   `.pulci/daemon.lock` (`fs2::FileExt::try_lock_exclusive`) before any other I/O.
   A second `pulci start` over the same project root fails fast with an actionable

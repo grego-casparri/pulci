@@ -240,6 +240,12 @@ def status(
             code_part = f"[{tool}/{code}]" if code else f"[{tool}]"
             typer.echo(f"  {file_}:{line}:{col}: {sev}{code_part} {msg}")
 
+    tool_errors = state.get("tool_errors", [])
+    if tool_errors:
+        typer.echo("\nTool errors (hooks that produced no verdict):")
+        for te in tool_errors:
+            typer.echo(f"  {te.get('tool', '?')}: {te.get('message', '')}")
+
     if summary.get("errors", 0) > 0:
         raise typer.Exit(code=1)
 
