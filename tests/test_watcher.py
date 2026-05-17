@@ -4,6 +4,7 @@ Tests for the Day 2 file watcher.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import subprocess
@@ -148,6 +149,65 @@ def test_start_ignores_atomic_write_temp_files() -> None:
             f"daemon ran a hook against an atomic-write temp file:\n{stdout}"
         )
         assert "E902" not in stdout, f"E902 (file not found) leaked from a temp file:\n{stdout}"
+
+
+def test_start_excludes_single_file_via_watch_exclude() -> None:
+    """Regression: a 0.0.4 user reported that `[watch] exclude` silently
+    ignored individual filenames — edits to excluded files still triggered
+    checks. Root cause was a relative project_root vs absolute notify event
+    paths; project_root is now canonicalised at startup so the comparison
+    works for both file and directory exclusions.
+    """
+    import pytest
+
+    if not pathlib.Path(PULCI_BIN).exists():
+        pytest.skip("pulci binary not found")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = pathlib.Path(tmpdir)
+        (tmp_path / "pulci.toml").write_text(
+            "[hooks]\n"
+            "ruff = true\n"
+            "ty = false\n"
+            "pytest = false\n"
+            "[watch]\n"
+            'exclude = ["pulci_smoketest.py"]\n'
+        )
+        # Pre-create the excluded file with intentional ruff violations so the
+        # daemon's initial sweep would have something to flag — if it touched
+        # this file the diagnostics would surface.
+        excluded = tmp_path / "pulci_smoketest.py"
+        excluded.write_text("import os\nimport sys\n")  # both unused → F401
+
+        # Also a non-excluded file so the daemon has SOMETHING to check.
+        other = tmp_path / "other.py"
+        other.write_text("import json\n")  # unused → F401
+
+        proc, _lines, thread = _start_daemon([PULCI_BIN, "start", str(tmp_path)])
+
+        # Trigger an edit on the excluded file. If the exclude works, no
+        # diagnostics for it should appear in state.json.
+        excluded.write_text("import os\nimport sys\nimport collections\n")
+
+        state_file = tmp_path / ".pulci" / "state.json"
+        _wait_for_state(state_file)
+        # Give one extra debounce window for the post-initial-scan event loop
+        # to run on the excluded-file edit and finalise state.
+        time.sleep(0.5)
+
+        proc.terminate()
+        proc.wait(timeout=5)
+        thread.join(timeout=2)
+
+        if not state_file.exists():
+            return  # No daemon could resolve ruff; skip
+        state = json.loads(state_file.read_text())
+        files_in_diagnostics = {d["file"] for d in state.get("diagnostics", [])}
+        excluded_str = str(excluded)
+        assert not any(
+            excluded_str.endswith(f) or f.endswith("pulci_smoketest.py")
+            for f in files_in_diagnostics
+        ), f"excluded file appeared in diagnostics: {files_in_diagnostics}"
 
 
 def test_start_agent_mode_emits_compiler_style_summary() -> None:

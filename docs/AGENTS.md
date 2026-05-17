@@ -4,7 +4,7 @@ This document is for AI coding agents (Claude Code, Cursor, Codex,
 custom harnesses). If you're a human, the [README](../README.md)
 is what you want.
 
-> This document describes the pulci contract as of **v0.0.4** (schema_version 1).
+> This document describes the pulci contract as of **v0.0.5** (schema_version 1).
 
 ## MCP setup (recommended)
 
@@ -71,6 +71,39 @@ This returns the aggregated diagnostics. Shape:
 ```
 
 Severity values: `"error"`, `"warning"`, `"info"`. Most adapters emit only `"error"` and `"warning"`. Handle `"info"` gracefully (do not treat as an error).
+
+### Scope of `diagnostics`: last check pass, not project-wide
+
+**Important contract detail.** Each `state.json` write is a snapshot of the
+files just checked, not a cumulative view of every problem in the project.
+
+- At daemon startup, the initial sweep checks every source file and writes
+  a state with every diagnostic found across the project.
+- After that, each file change triggers a check pass on the changed files
+  only. The resulting `state.json` carries the diagnostics from *that* pass
+  — replacing the previous state, not merging into it.
+
+Concretely: if the initial sweep found 2397 errors across 156 files, and
+you then edit `foo.py` (which has 4 errors), the next `state.json` shows
+`summary.errors == 4` and 4 diagnostics — all in `foo.py`. The 2393 errors
+in the other 155 files **did not disappear**; they're just not in the
+current snapshot.
+
+If the question you want answered is "did my edit introduce a regression?",
+this is exactly what you want — the snapshot tells you about the change.
+If the question is "is the project clean?", you need to consult the post-
+sweep state (preserved in git history of `state.json` between runs is not
+maintained, so you'd restart the daemon to get a fresh full snapshot).
+
+Per-file accumulating state — where editing `foo.py` cleans only its own
+diagnostics and leaves everyone else's intact — is tracked for a future
+release. For 0.0.x, "what just changed" is the working semantic.
+
+### `summary.checks_run`
+
+Number of hook adapters that ran in the last check pass. With ruff + ty
+enabled this is 2 every pass — it is not a cumulative counter of all
+check passes since daemon start.
 
 ### `tool_errors` field
 

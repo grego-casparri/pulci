@@ -7,7 +7,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 
-**v0.0.4** — Apache-2.0 — [docs/AGENTS.md](docs/AGENTS.md)
+**v0.0.5** — Apache-2.0 — [docs/AGENTS.md](docs/AGENTS.md)
 
 ## Why
 
@@ -267,6 +267,27 @@ manual tool output grows linearly with the number of violations.
 
 `.pulci/state.json` is the primary contract between pulci and consumers.
 Schema version is `1` and will be bumped on breaking changes.
+
+**Scope of `diagnostics`.** Each write of `state.json` reflects the *last
+check pass*, not the cumulative state of the whole project. The initial
+sweep at daemon startup populates state with diagnostics across every
+watched source file; every subsequent file change replaces that with the
+diagnostics from the files in that change. A consumer that asks "is the
+project clean?" after editing one file gets back "the files just checked
+are clean", not "no problems anywhere". This is intentional for the
+iteration loop (the relevant question is "did my edit introduce errors?"),
+but the difference matters for agents tracking project-wide health —
+they should consult the post-startup sweep snapshot, or trigger a rescan,
+when they want the full view.
+
+**`stale: true`** appears when pulci detects that the tool binaries
+changed between daemon runs (e.g. ruff was upgraded in the venv). It
+goes back to `false` after the next check pass. Treat a `stale: true`
+state as a fresh full re-check, not stale data.
+
+**`summary.checks_run`** is the count of hook adapters that ran in the
+last check pass (typically 2-4 depending on which hooks are enabled),
+not a cumulative counter of total check passes since daemon start.
 
 - Full schema: [`schemas/state.v1.schema.json`](schemas/state.v1.schema.json)
 - Config schema: [`schemas/pulci-toml.schema.json`](schemas/pulci-toml.schema.json)

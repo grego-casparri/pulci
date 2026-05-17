@@ -6,6 +6,12 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-05-17
+
+Driven by the first detailed external-agent feedback on 0.0.4. One
+silent-correctness bug, one bigger CLI feature, and several ergonomic
+polish items.
+
 ### Added
 - `pulci doctor [path]` — self-diagnosis without starting the daemon.
   Verifies project root exists, `pulci.toml` parses and contains no
@@ -27,6 +33,11 @@ Version scheme: [Semantic Versioning](https://semver.org/).
   designed for (capture `state_version` → edit → `pulci_status(since_version=v)`
   → branch on the structured response), with the actual benchmark numbers
   (339 vs 2391 tokens per iteration; 329 vs 466 ms latency).
+- Foreign-venv warning. When the resolver picks up a tool from `$PATH` and
+  that binary lives outside the current project root (typically a leftover
+  shell activation from another project's `.venv`), the daemon emits a
+  stderr warning and `pulci doctor` marks the tool with `outside_project_root`.
+  Common footgun; works correctly but not what most users intend.
 
 ### Changed
 - `pulci mcp` callback now accepts the project root via `--path` instead of
@@ -37,6 +48,36 @@ Version scheme: [Semantic Versioning](https://semver.org/).
   custom path that used the bare positional form (`args: ["mcp", "/path"]`)
   need to be updated to the new form (`args: ["mcp", "--path", "/path"]`)
   — `pulci mcp info` already emits the new form.
+- Initial-sweep output in human mode is now a single summary line
+  (`N errors (initial sweep — see .pulci/state.json for details), …`)
+  instead of dumping every diagnostic to stdout. On a real project the
+  per-diagnostic stream was hundreds of KB of text no human reads;
+  state.json has the same data structured. Agent mode (`--agent`) keeps
+  streaming per-diagnostic since agents want the raw data on stdout.
+- MCP server no longer prints courtesy startup messages to stderr.
+  The "Starting pulci MCP server …" and "Run `pulci mcp info`" banners
+  became noise in MCP host logs once stdio became the only transport.
+
+### Fixed
+- `[watch] exclude` now correctly excludes both individual files and
+  directories. Previously the daemon's `is_excluded` comparison failed
+  silently when `pulci start` was invoked with a relative project root
+  (the default when run with no argument) because notify reports event
+  paths absolute while the joined exclude prefix stayed relative —
+  `Path::starts_with` is component-based and never matches absolute vs
+  relative. The daemon now canonicalises the project root at startup, so
+  excludes work uniformly. Regression test in `tests/test_watcher.py`.
+
+### Documented
+- The "last check pass" semantic of `.pulci/state.json` is now described
+  in README, `docs/AGENTS.md`, and the Invariants section of
+  `docs/ARCHITECTURE.md`. Each `state.json` write reflects the files just
+  checked, not a cumulative project-wide view — important for agents that
+  ask "is the project clean?" after a single edit. Accumulating per-file
+  state is tracked as a candidate redesign for 0.0.6.
+- `stale: true` semantics documented in README state-file contract.
+- `summary.checks_run` clarified: it counts hooks-run-this-pass, not
+  cumulative check passes since daemon start.
 
 ## [0.0.4] - 2026-05-17
 

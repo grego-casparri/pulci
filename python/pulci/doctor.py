@@ -338,18 +338,36 @@ def _check_one_tool(
     if not result["found"]:
         report.add(Check(section, name, "fail", result["error"]))
         return
-    location = result.get("path") or f"({result['source']})"
-    message = f"{result['version']:<10} via {result['source']:<11} {location}"
+
+    # Foreign-venv detection: when the binary came from $PATH and lives
+    # outside the project root, an unrelated venv probably won the resolve
+    # because of shell-activation leak. Works but worth flagging.
+    status: CheckStatus = "pass"
+    foreign_note = ""
+    bin_path = result.get("path")
+    if result.get("source") == "system-path" and bin_path is not None:
+        try:
+            resolved_root = project_root.resolve()
+            resolved_bin = pathlib.Path(bin_path).resolve()
+            if not str(resolved_bin).startswith(str(resolved_root)):
+                status = "warn"
+                foreign_note = "  ← outside project root"
+        except OSError:
+            pass
+
+    location = bin_path or f"({result['source']})"
+    message = f"{result['version']:<10} via {result['source']:<11} {location}{foreign_note}"
     report.add(
         Check(
             section,
             name,
-            "pass",
+            status,
             message.strip(),
             details={
                 "version": result["version"],
                 "source": result["source"],
                 "path": result.get("path"),
+                "outside_project_root": bool(foreign_note),
             },
         )
     )

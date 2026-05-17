@@ -138,6 +138,18 @@ rename is atomic on the same filesystem, so a reader sees either the previous
 complete state or the new complete state — never a partial. There is no
 incremental update path; every write is a whole `State`.
 
+**State scope is the last check pass, not the project.** Each `state.json`
+write reflects the diagnostics from the files just checked, not a cumulative
+view across the project. The initial sweep at daemon startup writes a state
+with every diagnostic found in every source file; every subsequent change
+replaces that with the diagnostics from just the changed files. A consumer
+that wants "is this project clean?" needs the post-startup snapshot or to
+trigger a rescan, not the most recent post-edit state. Per-file accumulating
+state — where editing `foo.py` clears only its own diagnostics — is a
+candidate redesign for a future release; the current "last check pass"
+semantic is intentional for the iteration-time use case ("did my edit
+regress anything?") and minimises the in-memory state pulci has to track.
+
 **Monotonic `state_version`.** Incremented exactly once per `build_state` call,
 which happens exactly once per check pass. The counter never decreases —
 **including across daemon restarts**: the new daemon reads the previous

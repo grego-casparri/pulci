@@ -267,15 +267,11 @@ def mcp_cmd(
 
         if path != ".":
             os.chdir(path)
-        typer.echo(
-            f"Starting pulci MCP server (stdio, project: {pathlib.Path(path).resolve()}).",
-            err=True,
-        )
-        typer.echo(
-            "Run `pulci mcp info` to get the config block, or "
-            "`pulci mcp install <host>` to install it directly.",
-            err=True,
-        )
+        # Stdio is the only transport today and the only consumer is an MCP
+        # host that's literally treating our stdout/stderr as the wire. Any
+        # courtesy text we add here ends up as noise in the host's logs.
+        # Skip the chatty banner; setup-time messages belong in
+        # `pulci mcp info` / `pulci mcp install`, not in the live server.
         _mcp_server.run(transport=transport)
 
 

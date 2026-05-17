@@ -119,7 +119,20 @@ fn version() -> &'static str {
 /// Blocks until Ctrl-C (raises KeyboardInterrupt via `py.check_signals()`).
 #[pyfunction]
 fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
-    let project_root = PathBuf::from(&path);
+    // Canonicalize the project root at startup. Without this, a relative
+    // CLI arg (`pulci start .`) leaves project_root as the literal "."; later
+    // joins (project_root.join(excl)) produce relative paths like "./foo.py"
+    // that fail to component-prefix-match the absolute paths notify reports
+    // for file events. Symptom: [watch] exclude entries silently no-op.
+    // Canonicalize also normalises symlinks and trailing slashes, so the
+    // single source of truth for paths is fixed before anything else runs.
+    let project_root = PathBuf::from(&path)
+        .canonicalize()
+        .map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "could not resolve project root {path:?}: {e}"
+            ))
+        })?;
     let pulci_dir = project_root.join(".pulci");
     let state_file = pulci_dir.join("state.json");
 
@@ -208,6 +221,28 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         |name, pinned| pulci_core::resolver::resolve_tool(name, &project_root, pinned),
     )
     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+    // Foreign-venv warning. When `$PATH` carries a leaked activation from
+    // another project, the resolver picks that project's binary instead of
+    // a tool actually scoped to this one. Still works, but the user almost
+    // certainly didn't mean it. Flag in stderr; doctor surfaces the same.
+    for ti in &tool_infos {
+        if ti.source == "system-path" {
+            if let Some(p) = &ti.path {
+                let bin_path = std::path::Path::new(p);
+                if !bin_path.starts_with(&project_root) {
+                    eprintln!(
+                        "pulci: warning: `{}` resolved to {} — outside the project root ({}). \
+                         Likely a venv-on-PATH leak from another project. \
+                         Install the tool in this project's .venv or pin via [tools] in pulci.toml.",
+                        ti.name,
+                        p,
+                        project_root.display()
+                    );
+                }
+            }
+        }
+    }
 
     // Read prior state once: feed both stale detection AND state_version
     // seeding. Without seeding, the monotonic counter resets to 0 on every
@@ -299,19 +334,32 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
             });
             let _ = results;
             stale = false;
-            for d in &state.diagnostics {
-                let code_part = d.code.as_deref()
-                    .map(|c| format!("[{}/{}]", d.tool, c))
-                    .unwrap_or_else(|| format!("[{}]", d.tool));
-                println!(
-                    "{}:{}:{}: {} {} {}",
-                    d.file.display(), d.line, d.col, d.severity, code_part, d.message
-                );
+            // Human mode: skip the per-diagnostic stream during the initial
+            // sweep. On large projects this is 2000+ lines / hundreds of KB
+            // of text no human is going to read; state.json has the same data
+            // queryable. Agent mode keeps streaming because agents want the
+            // raw diagnostics on stdout.
+            if agent {
+                for d in &state.diagnostics {
+                    let code_part = d.code.as_deref()
+                        .map(|c| format!("[{}/{}]", d.tool, c))
+                        .unwrap_or_else(|| format!("[{}]", d.tool));
+                    println!(
+                        "{}:{}:{}: {} {} {}",
+                        d.file.display(), d.line, d.col, d.severity, code_part, d.message
+                    );
+                }
             }
             let elapsed = t0.elapsed().as_secs_f64();
+            let label = if agent {
+                "errors"
+            } else {
+                "errors (initial sweep — see .pulci/state.json for details)"
+            };
             println!(
-                "{} errors, {} warnings ({} files checked, {:.1}s)",
+                "{} {}, {} warnings ({} files checked, {:.1}s)",
                 state.summary.errors,
+                label,
                 state.summary.warnings,
                 changed.len(),
                 elapsed,
