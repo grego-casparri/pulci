@@ -127,15 +127,15 @@ The tool never sets `isError: true` (the MCP protocol field that marks a tool
 call as failed) for a missing daemon. A missing daemon is a valid state, not a
 tool failure.
 
-### Causal synchronisation: wait_for_file + since_version
+### Causal synchronisation: since_version
 
-`pulci_status` accepts optional parameters to avoid polling or fixed sleeps:
+`pulci_status` accepts two optional parameters that let you avoid polling
+or fixed sleeps when waiting for a fresh result after an edit:
 
-| Parameter        | Type         | Default | Description                                                        |
-|------------------|--------------|---------|--------------------------------------------------------------------|
-| `wait_for_file`  | `str \| None` | `None`  | Semantic hint: the file you just edited. The daemon produces global state (not per-file), so the actual wait is driven by `since_version`. Always pair with it. |
-| `since_version`  | `int \| None` | `None`  | Block until `state_version > since_version`.                       |
-| `timeout_ms`     | `int`        | `5000`  | Max wait in ms. Returns `{"status": "timeout"}` if exceeded.       |
+| Parameter       | Type           | Default | Description                                                  |
+|-----------------|----------------|---------|--------------------------------------------------------------|
+| `since_version` | `int \| None`  | `None`  | Block until `state_version > since_version`.                 |
+| `timeout_ms`    | `int`          | `5000`  | Max wait in ms. Returns `{"status": "timeout"}` if exceeded. |
 
 **Recommended agent loop:**
 
@@ -147,12 +147,15 @@ v = (await pulci_status()).get("state_version", 0)
 # edit foo.py ...
 
 # 3. Wait for the daemon to process it — zero sleep, zero polling
-result = await pulci_status(wait_for_file="foo.py", since_version=v)
+result = await pulci_status(since_version=v)
 # result is fresh state; read diagnostics and decide
 ```
 
 `since_version` is the key to causal correctness: it guarantees you wait for
-a result produced *after* your edit, even if the daemon is very fast.
+a result produced *after* your edit, even if the daemon is very fast. There
+is no per-file wait — the daemon produces a single global state and every
+edit advances `state_version`, so waiting for a version strictly greater
+than yours is the right primitive.
 
 ## Adapter version compatibility
 
@@ -222,9 +225,10 @@ incremental one. It returns to `false` on the next check pass.
 project scan immediately after the watcher initialises, so `.pulci/state.json`
 is populated within seconds of daemon start. `pulci status` works without
 needing to touch a file first. The short window between `pulci start` and
-the scan completing is reported as `daemon_status: "alive"` with `status:
-"running_no_checks_yet"` (CLI) or `status: "not_running"` (MCP, until state.json
-exists — a known asymmetry tracked for closure).
+the scan completing is reported consistently across surfaces as
+`daemon_status: "alive"` with `status: "running_no_checks_yet"` — both the
+CLI and the MCP tool return this shape so agents reading either get the same
+signal.
 
 ## What pulci is not
 

@@ -6,6 +6,31 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+- `wait_for_file` parameter on the `pulci_status` MCP tool. The parameter
+  was documented as a "semantic hint" with no functional effect — the
+  daemon produces a single global state, so the actual wait was driven
+  entirely by `since_version`. Callers passing it now get a `TypeError`;
+  drop the keyword from your calls. Causal synchronisation continues to
+  work through `since_version` alone, which is what the code did all along.
+
+### Changed
+- MCP `pulci_status` now distinguishes "no daemon" from "daemon alive but
+  pre-scan" — matching the CLI behaviour. When `state.json` is absent and
+  the heartbeat is alive, the tool returns `{"status": "running_no_checks_yet",
+  "daemon_status": "alive", "hint": "..."}` instead of `{"status": "not_running"}`.
+- MCP `pulci_status` success responses now carry `daemon_status`,
+  `daemon_heartbeat_at`, and `age` (with `heartbeat_seconds_ago` and
+  `last_check_seconds_ago`) — the same enrichment `pulci status --json`
+  already returns. Agents reading either surface now see the same shape.
+  Schema (`state.v1.schema.json`) already declares these as optional fields.
+- Internal refactor: extracted heartbeat reading, daemon-health derivation,
+  state-file parsing, and response enrichment into `pulci._heartbeat`,
+  shared by `pulci.cli` and `pulci.mcp_server`. Narrowed exception
+  catches from `except Exception` to specific types (`OSError`,
+  `ValueError`, `json.JSONDecodeError`) with one-line stderr warnings so
+  failures are debuggable rather than silently swallowed.
+
 ### Added
 - `[hooks] pytest_test_patterns` in `pulci.toml`: list of templates pulci
   uses to map a changed source file to its test file(s). Each template can

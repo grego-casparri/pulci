@@ -52,6 +52,21 @@ def test_pulci_status_no_daemon(tmp_path: pathlib.Path) -> None:
     assert "hint" in result
 
 
+def test_pulci_status_alive_daemon_without_state_yet_returns_running_no_checks_yet(
+    tmp_path: pathlib.Path,
+) -> None:
+    # Regression: previously the MCP server returned not_running even when the
+    # daemon was alive but state.json hadn't been written yet — disagreeing
+    # with the CLI which already distinguished this case. The audit flagged
+    # the asymmetry; the fix mirrors the CLI's running_no_checks_yet branch.
+    (tmp_path / ".pulci").mkdir()
+    _write_heartbeat(tmp_path / ".pulci")
+    result = _run(pulci_status(str(tmp_path)))
+    assert result["status"] == "running_no_checks_yet"
+    assert result["daemon_status"] == "alive"
+    assert "hint" in result
+
+
 def test_pulci_status_returns_state(tmp_path: pathlib.Path) -> None:
     _write_state(tmp_path / ".pulci", MINIMAL_STATE)
     _write_heartbeat(tmp_path / ".pulci")
@@ -59,6 +74,20 @@ def test_pulci_status_returns_state(tmp_path: pathlib.Path) -> None:
     assert result["schema_version"] == 1
     assert result["state_version"] == 1
     assert result["summary"]["errors"] == 0
+
+
+def test_pulci_status_fast_path_enriches_with_daemon_status(
+    tmp_path: pathlib.Path,
+) -> None:
+    # MCP responses now carry the same daemon_status/age enrichment as
+    # `pulci status --json`. Agents can detect a dead-daemon-with-stale-state
+    # situation through the response, no separate call required.
+    _write_state(tmp_path / ".pulci", MINIMAL_STATE)
+    _write_heartbeat(tmp_path / ".pulci", secs_ago=5)
+    result = _run(pulci_status(str(tmp_path)))
+    assert result["daemon_status"] == "alive"
+    assert "age" in result
+    assert "heartbeat_seconds_ago" in result["age"]
 
 
 def test_pulci_status_dead_daemon_fast_path_returns_last_state(tmp_path: pathlib.Path) -> None:
@@ -121,14 +150,6 @@ def test_mcp_info_command_is_pulci_bin(capsys: pytest.CaptureFixture) -> None:
     command = config["mcpServers"]["pulci"]["command"]
     # Command must resolve to the pulci binary (stem covers pulci.EXE on Windows).
     assert pathlib.Path(command).stem == "pulci"
-
-
-def test_wait_for_file_without_since_version_is_fast_path(tmp_path: pathlib.Path) -> None:
-    # wait_for_file alone (no since_version) must return immediately — fast path.
-    _write_state(tmp_path / ".pulci", MINIMAL_STATE)
-    _write_heartbeat(tmp_path / ".pulci")
-    result = _run(pulci_status(str(tmp_path), wait_for_file="foo.py"))
-    assert result["schema_version"] == 1
 
 
 def test_wait_for_returns_immediately_when_version_advanced(tmp_path: pathlib.Path) -> None:

@@ -4,7 +4,6 @@ Command-line interface for pulci.
 
 from __future__ import annotations
 
-import datetime
 import json
 import pathlib
 from typing import Annotated, Literal
@@ -12,41 +11,14 @@ from typing import Annotated, Literal
 import typer
 
 from pulci import __version__, _native
+from pulci._heartbeat import (
+    heartbeat_info as _heartbeat_info,
+)
+from pulci._heartbeat import (
+    last_check_seconds_ago as _last_check_seconds_ago,
+)
 from pulci.mcp_server import mcp as _mcp_server
 from pulci.mcp_server import print_mcp_info
-
-_HEARTBEAT_ALIVE_SECS = 30
-_HEARTBEAT_DEAD_SECS = 120
-
-
-def _heartbeat_info(state_dir: pathlib.Path) -> dict:
-    """
-    Read .pulci/heartbeat and compute daemon health.
-
-    Returns a dict with keys: daemon_status, daemon_heartbeat_at,
-    heartbeat_seconds_ago. daemon_status is one of: alive, stale_heartbeat, dead.
-    """
-    hb_file = state_dir / "heartbeat"
-    if not hb_file.exists():
-        return {"daemon_status": "dead", "daemon_heartbeat_at": None, "heartbeat_seconds_ago": None}
-    try:
-        ts_str = hb_file.read_text().strip()
-        ts = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-        now = datetime.datetime.now(datetime.timezone.utc)
-        secs_ago = int((now - ts).total_seconds())
-        if secs_ago < _HEARTBEAT_ALIVE_SECS:
-            status = "alive"
-        elif secs_ago < _HEARTBEAT_DEAD_SECS:
-            status = "stale_heartbeat"
-        else:
-            status = "dead"
-        return {
-            "daemon_status": status,
-            "daemon_heartbeat_at": ts_str,
-            "heartbeat_seconds_ago": secs_ago,
-        }
-    except Exception:
-        return {"daemon_status": "dead", "daemon_heartbeat_at": None, "heartbeat_seconds_ago": None}
 
 
 def _version_callback(value: bool) -> None:
@@ -166,18 +138,7 @@ def status(
 
     summary = state.get("summary", {})
     hb = _heartbeat_info(state_file.parent)
-
-    # Compute last-check age from state timestamp
-    last_check_secs: int | None = None
-    ts_str = state.get("timestamp")
-    if ts_str:
-        try:
-            ts = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-            last_check_secs = int(
-                (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds()
-            )
-        except Exception:
-            pass
+    last_check_secs = _last_check_seconds_ago(state)
 
     if json_output:
         state["daemon_status"] = hb["daemon_status"]

@@ -15,6 +15,19 @@ import time
 
 from mcp.server.fastmcp import FastMCP
 
+from pulci._heartbeat import (
+    daemon_dead as _daemon_dead,
+)
+from pulci._heartbeat import (
+    enrich as _enrich,
+)
+from pulci._heartbeat import (
+    heartbeat_info as _heartbeat_info,
+)
+from pulci._heartbeat import (
+    read_state_json as _read_state,
+)
+
 mcp = FastMCP(
     "pulci",
     instructions=(
@@ -28,41 +41,11 @@ mcp = FastMCP(
 )
 
 _POLL_INTERVAL = 0.05  # seconds between state.json reads when waiting
-_HEARTBEAT_DEAD_SECS = 120
-
-
-def _daemon_dead(state_dir: pathlib.Path) -> bool:
-    """
-    Return True if the daemon heartbeat is absent or older than _HEARTBEAT_DEAD_SECS.
-    """
-    import datetime
-
-    hb_file = state_dir / "heartbeat"
-    if not hb_file.exists():
-        return True
-    try:
-        ts_str = hb_file.read_text().strip()
-        ts = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-        secs_ago = (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds()
-        return secs_ago >= _HEARTBEAT_DEAD_SECS
-    except Exception:
-        return True
-
-
-def _read_state(state_file: pathlib.Path) -> dict:
-    try:
-        return json.loads(state_file.read_text())
-    except json.JSONDecodeError:
-        return {
-            "status": "error",
-            "hint": "state.json is corrupted — stop and restart `pulci start`",
-        }
 
 
 @mcp.tool()
 async def pulci_status(
     path: str = ".",
-    wait_for_file: str | None = None,
     since_version: int | None = None,
     timeout_ms: int = 5000,
 ) -> dict:
@@ -74,18 +57,17 @@ async def pulci_status(
 
     If the daemon is not running, returns {"status": "not_running", "hint": "..."}.
 
-    Causal synchronisation (D-013):
-      - since_version: block until state_version > since_version.
-      - wait_for_file: semantic hint for which file you care about. The daemon
-        produces global state (not per-file), so the actual wait is driven by
-        since_version. Always pair wait_for_file with since_version.
+    Causal synchronisation:
+      - since_version: block until state_version > since_version. Used by
+        agents to wait for a fresh result after editing a file: capture the
+        current version before editing, then call with since_version=that.
       - timeout_ms: max wait in milliseconds (default 5000). Returns
         {"status": "timeout"} if the daemon does not produce a new result in time.
 
     Recommended agent loop:
       v = (await pulci_status()).get("state_version", 0)
       # edit foo.py
-      result = await pulci_status(wait_for_file="foo.py", since_version=v)
+      result = await pulci_status(since_version=v)
     """
     state_file = pathlib.Path(path).resolve() / ".pulci" / "state.json"
     state_dir = state_file.parent
@@ -96,11 +78,21 @@ async def pulci_status(
     }
 
     if not state_file.exists():
+        # Parity with `pulci status`: distinguish "no daemon at all" from
+        # "daemon just started, initial scan still running". Without this the
+        # CLI and MCP gave different answers for the same daemon state.
+        hb = _heartbeat_info(state_dir)
+        if hb["daemon_status"] == "alive":
+            return {
+                "status": "running_no_checks_yet",
+                "daemon_status": "alive",
+                "hint": "daemon is running — initial scan in progress or no file changes yet",
+            }
         return _not_running
 
     # Fast path — no blocking requested.
     if since_version is None:
-        return _read_state(state_file)
+        return _enrich(_read_state(state_file), state_dir)
 
     # If daemon is confirmed dead, no point waiting for a version that will never arrive.
     if _daemon_dead(state_dir):
@@ -115,7 +107,7 @@ async def pulci_status(
         state = _read_state(state_file)
         current_version = state.get("state_version", 0)
         if current_version > since_version:
-            return state
+            return _enrich(state, state_dir)
 
         remaining = deadline - time.monotonic()
         if remaining <= 0:
