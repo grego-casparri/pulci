@@ -283,6 +283,43 @@ mod tests {
         assert_eq!(ts.len(), 20, "expected 20-char ISO 8601, got: {ts}");
     }
 
+    /// Cross-check `jdn_to_ymd` against an independent ymd→jdn formula on
+    /// dates that exercise the corner cases of the Gregorian calendar
+    /// (leap year rule + century non-leap rule). Catches "someone flipped
+    /// a sign in the algorithm" kind of regressions, which the prior
+    /// format-only `timestamp_is_iso8601` test would silently miss.
+    #[test]
+    fn jdn_to_ymd_round_trips_known_dates_including_leap_rules() {
+        // Independent forward conversion (Fliegel & Van Flandern, 1968) —
+        // distinct from the inverse in jdn_to_ymd so a shared bug is
+        // unlikely.
+        fn ymd_to_jdn(year: u32, month: u32, day: u32) -> u32 {
+            let a = (14 - month) / 12;
+            let y = year + 4800 - a;
+            let m = month + 12 * a - 3;
+            day + (153 * m + 2) / 5 + 365 * y + y / 4 - y / 100 + y / 400 - 32045
+        }
+        let cases = [
+            (1970, 1, 1),     // Unix epoch
+            (2000, 2, 29),    // century year divisible by 400 → IS leap
+            (2000, 3, 1),     // day after that leap
+            (2024, 2, 29),    // ordinary leap year
+            (2024, 12, 31),   // late-in-year normal date
+            (2100, 2, 28),    // century year not divisible by 400
+            (2100, 3, 1),     // → next day is March 1, not Feb 29 (non-leap)
+            (2026, 5, 17),    // current date sanity check
+        ];
+        for (y, m, d) in cases {
+            let jdn = ymd_to_jdn(y, m, d);
+            let (ry, rm, rd) = jdn_to_ymd(jdn);
+            assert_eq!(
+                (ry, rm, rd),
+                (y, m, d),
+                "jdn_to_ymd round-trip failed for {y}-{m:02}-{d:02} (jdn={jdn})"
+            );
+        }
+    }
+
     #[test]
     fn diagnostics_sorted_by_file_then_line() {
         let mut results = make_result(0, 0);

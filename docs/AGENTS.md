@@ -157,6 +157,25 @@ is no per-file wait — the daemon produces a single global state and every
 edit advances `state_version`, so waiting for a version strictly greater
 than yours is the right primitive.
 
+### Handling edge cases
+
+`pulci_status` (and `pulci status --json`) returns one of these shapes.
+Match on the keys before reading `summary` or `diagnostics`.
+
+| Response shape (key fields)                                       | What it means                                              | Recommended action                                                            |
+|-------------------------------------------------------------------|------------------------------------------------------------|-------------------------------------------------------------------------------|
+| `{"status": "not_running", "hint": ...}`                          | No daemon (no heartbeat or heartbeat older than 120 s).    | Surface to the user; offer to run `pulci start <path>`.                       |
+| `{"status": "running_no_checks_yet", "daemon_status": "alive"}`   | Daemon started; initial scan still in progress.            | Brief retry (~200 ms) before reading state. Almost always resolves in <2 s.   |
+| `{"status": "timeout", "hint": ...}`                              | `since_version` was not surpassed within `timeout_ms`.     | Re-call without `since_version` to see current state. If state looks healthy (heartbeat alive, no `tool_errors`) the daemon may have skipped the change as a no-op. |
+| `{"status": "error", "hint": ...}`                                | `state.json` is corrupted on disk.                         | Stop and restart the daemon. Surface to the user; don't retry blindly.        |
+| Full state with `tool_errors` non-empty                           | One or more hooks produced no verdict (timeout, crash).    | Decide: retry once (transient) or proceed acknowledging the missing verdict. Do NOT treat absence of diagnostics from those tools as success. |
+| Full state, `summary.errors == 0 && summary.warnings == 0 && tool_errors == []` | Clean.                                       | Proceed.                                                                       |
+
+For long-lived agents that keep `since_version` across daemon restarts:
+the counter is persisted (the new daemon seeds from the prior
+`state.json`), so a cached `since_version` from an older daemon is still
+valid against a fresh process.
+
 ## Adapter version compatibility
 
 pulci exposes diagnostic codes from the underlying tools (e.g. `ruff/F401`).
