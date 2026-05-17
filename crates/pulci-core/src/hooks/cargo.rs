@@ -3,7 +3,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use super::{Diagnostic, Hook, Severity};
+use super::{run_with_timeout, Diagnostic, Hook, Severity, DEFAULT_HOOK_TIMEOUT};
 use crate::resolver::ResolvedTool;
 
 pub struct CargoAdapter {
@@ -52,10 +52,16 @@ impl Hook for CargoAdapter {
         let (bin, prefix_args) = self.invocation
             .split_first()
             .ok_or_else(|| anyhow::anyhow!("cargo invocation vector is empty"))?;
-        let output = Command::new(bin)
-            .args(prefix_args)
-            .args(["clippy", "--workspace", "--message-format=json", "--", "-D", "warnings"])
-            .output()?;
+        let mut cmd = Command::new(bin);
+        cmd.args(prefix_args).args([
+            "clippy",
+            "--workspace",
+            "--message-format=json",
+            "--",
+            "-D",
+            "warnings",
+        ]);
+        let output = run_with_timeout(cmd, DEFAULT_HOOK_TIMEOUT, "clippy")?;
         // clippy exits non-zero when warnings/errors are found (-D warnings), so we parse
         // stdout regardless of exit status. A None code (signal kill) is a real failure.
         if output.status.code().is_none() {

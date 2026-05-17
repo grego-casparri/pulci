@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{Diagnostic, Hook, Severity};
+use super::{run_with_timeout, Diagnostic, Hook, Severity, DEFAULT_HOOK_TIMEOUT};
 
 pub struct PytestAdapter {
     invocation: Vec<String>,
@@ -35,12 +35,12 @@ impl Hook for PytestAdapter {
         let (bin, prefix_args) = self.invocation
             .split_first()
             .ok_or_else(|| anyhow::anyhow!("pytest invocation vector is empty"))?;
-        let output = Command::new(bin)
-            .args(prefix_args)
+        let mut cmd = Command::new(bin);
+        cmd.args(prefix_args)
             .args(["--tb=no", "-q", "--no-header"])
             .current_dir(&self.project_root)
-            .args(&test_files)
-            .output()?;
+            .args(&test_files);
+        let output = run_with_timeout(cmd, DEFAULT_HOOK_TIMEOUT, "pytest")?;
 
         // pytest exit 0 = all passed, exit 1 = failures found.
         // code() is None when killed by signal — bail rather than silently return empty.

@@ -3,7 +3,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use super::{Diagnostic, Hook, Severity};
+use super::{run_with_timeout, Diagnostic, Hook, Severity, DEFAULT_HOOK_TIMEOUT};
 
 pub struct RuffAdapter {
     invocation: Vec<String>,
@@ -39,11 +39,11 @@ impl Hook for RuffAdapter {
         let (bin, prefix_args) = self.invocation
             .split_first()
             .ok_or_else(|| anyhow::anyhow!("ruff invocation vector is empty"))?;
-        let output = Command::new(bin)
-            .args(prefix_args)
+        let mut cmd = Command::new(bin);
+        cmd.args(prefix_args)
             .args(["check", "--output-format=json"])
-            .args(files)
-            .output()?;
+            .args(files);
+        let output = run_with_timeout(cmd, DEFAULT_HOOK_TIMEOUT, "ruff")?;
 
         // code() is None when the process was killed by a signal — treat as error.
         // ruff exit 0 = clean, exit 1 = violations found, exit > 1 = internal error.

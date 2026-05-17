@@ -34,6 +34,12 @@ Version scheme: [Semantic Versioning](https://semver.org/).
   `.pulci/daemon.lock` (`fs2::FileExt::try_lock_exclusive`) before any other I/O.
   A second `pulci start` over the same project root fails fast with an actionable
   message (`"another pulci daemon is already running for this project"`).
+- Per-hook timeout: `hooks::run_with_timeout` spawns each hook subprocess, drains
+  stdout/stderr in background threads to avoid pipe-full deadlock, and kills the
+  child after `DEFAULT_HOOK_TIMEOUT` (120 s). Prevents the daemon from freezing
+  when a tool hangs (uvx network stall, deadlocked child, infinite-loop user code
+  under pytest). The error is captured by the orchestrator; `state.json` keeps
+  advancing rather than staying frozen with a fresh heartbeat.
 - Daemon heartbeat: `pulci start` writes `.pulci/heartbeat` every 10 s from a
   background thread, independent of check activity. `pulci status` derives
   `daemon_status` (`alive` / `stale_heartbeat` / `dead`) from the heartbeat age,
