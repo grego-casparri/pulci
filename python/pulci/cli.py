@@ -101,8 +101,11 @@ def status(
     state_file = pathlib.Path(path) / ".pulci" / "state.json"
 
     if not state_file.exists():
-        typer.echo("No state available. Run `pulci start` first.", err=True)
-        raise typer.Exit(code=1)
+        if json_output:
+            typer.echo(json.dumps({"status": "not_running", "hint": "run `pulci start` first"}))
+        else:
+            typer.echo("No state available. Run `pulci start` first.", err=True)
+        raise typer.Exit(code=0)
 
     raw = state_file.read_text()
 
@@ -179,6 +182,11 @@ def mcp_cmd(
 
         if path != ".":
             os.chdir(path)
+        typer.echo(
+            f"Starting pulci MCP server (stdio, project: {pathlib.Path(path).resolve()}).",
+            err=True,
+        )
+        typer.echo("Run `pulci mcp info` to get the config block for your MCP host.", err=True)
         _mcp_server.run(transport=transport)
 
 

@@ -33,12 +33,18 @@ impl Hook for PytestAdapter {
 
         let (bin, prefix_args) = self.invocation
             .split_first()
-            .expect("invocation is always non-empty");
+            .ok_or_else(|| anyhow::anyhow!("pytest invocation vector is empty"))?;
         let output = Command::new(bin)
             .args(prefix_args)
             .args(["--tb=no", "-q", "--no-header"])
             .args(&test_files)
             .output()?;
+
+        // pytest exit 0 = all passed, exit 1 = failures found.
+        // code() is None when killed by signal — bail rather than silently return empty.
+        if output.status.code().is_none() {
+            anyhow::bail!("pytest was killed by a signal");
+        }
 
         Ok(parse_pytest_output(&output.stdout))
     }

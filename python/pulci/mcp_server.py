@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import pathlib
+import shutil
 import sys
 import time
 
@@ -21,8 +22,8 @@ mcp = FastMCP(
         "Use pulci_status to get the current state of ruff, ty, and pytest "
         "checks after each file edit. Never invoke ruff/ty/pytest directly "
         "while pulci is active — it already ran them in the background. "
-        "For causal synchronisation after an edit, pass wait_for_file and "
-        "since_version so the tool blocks until a fresh result is ready."
+        "For causal synchronisation after an edit, pass since_version so the "
+        "tool blocks until a fresh result is ready."
     ),
 )
 
@@ -55,12 +56,14 @@ async def pulci_status(
     If the daemon is not running, returns {"status": "not_running", "hint": "..."}.
 
     Causal synchronisation (D-013):
-      - wait_for_file: block until a result that covers this file is available.
-      - since_version: the state_version already seen; wait until state_version > since_version.
-      - timeout_ms: max wait in milliseconds (default 5000). Returns {"status": "timeout"}
-        if the daemon does not produce a new result in time.
+      - since_version: block until state_version > since_version.
+      - wait_for_file: semantic hint for which file you care about. The daemon
+        produces global state (not per-file), so the actual wait is driven by
+        since_version. Always pair wait_for_file with since_version.
+      - timeout_ms: max wait in milliseconds (default 5000). Returns
+        {"status": "timeout"} if the daemon does not produce a new result in time.
 
-    Typical agent loop:
+    Recommended agent loop:
       v = (await pulci_status()).get("state_version", 0)
       # edit foo.py
       result = await pulci_status(wait_for_file="foo.py", since_version=v)
@@ -73,13 +76,12 @@ async def pulci_status(
             "hint": f"run `pulci start {path}` in your terminal to start the daemon",
         }
 
-    # Fast path — no synchronisation requested.
-    if wait_for_file is None and since_version is None:
+    # Fast path — no blocking requested.
+    if since_version is None:
         return _read_state(state_file)
 
     # Blocking path — wait until state_version > since_version.
     deadline = time.monotonic() + timeout_ms / 1000.0
-    baseline = since_version if since_version is not None else -1
 
     while True:
         if not state_file.exists():
@@ -89,7 +91,7 @@ async def pulci_status(
             }
         state = _read_state(state_file)
         current_version = state.get("state_version", 0)
-        if current_version > baseline:
+        if current_version > since_version:
             return state
 
         remaining = deadline - time.monotonic()
@@ -108,7 +110,7 @@ def print_mcp_info(path: str = ".") -> None:
     """
     Print the MCP config block the user pastes into their host config.
     """
-    pulci_bin = str(pathlib.Path(sys.executable).parent / "pulci")
+    pulci_bin = shutil.which("pulci") or str(pathlib.Path(sys.executable).parent / "pulci")
     args: list[str] = ["mcp"]
     if path != ".":
         args.append(path)

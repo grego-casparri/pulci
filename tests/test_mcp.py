@@ -7,7 +7,6 @@ from __future__ import annotations
 import asyncio
 import json
 import pathlib
-import sys
 import threading
 import time
 
@@ -99,8 +98,15 @@ def test_mcp_info_command_is_pulci_bin(capsys: pytest.CaptureFixture) -> None:
     first_block = captured.out[: captured.out.find("\n\n")]
     config = json.loads(first_block)
     command = config["mcpServers"]["pulci"]["command"]
-    expected = str(pathlib.Path(sys.executable).parent / "pulci")
-    assert command == expected
+    # Command must end with "pulci" — either found via shutil.which or fallback path.
+    assert pathlib.Path(command).name == "pulci"
+
+
+def test_wait_for_file_without_since_version_is_fast_path(tmp_path: pathlib.Path) -> None:
+    # wait_for_file alone (no since_version) must return immediately — fast path.
+    _write_state(tmp_path / ".pulci", MINIMAL_STATE)
+    result = _run(pulci_status(str(tmp_path), wait_for_file="foo.py"))
+    assert result["schema_version"] == 1
 
 
 def test_wait_for_returns_immediately_when_version_advanced(tmp_path: pathlib.Path) -> None:

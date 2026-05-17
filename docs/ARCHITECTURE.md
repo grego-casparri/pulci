@@ -136,5 +136,3 @@ These are real problems, but not pulci's:
   moment. They are complementary, not competing.
 - **CI execution.** MegaLinter and friends own that. pulci's daemon
   doesn't make sense in ephemeral CI containers.
-- **MCP server (yet).** Post-v0.1. The CLI + JSON state file is a
-  perfectly good agent interface for now.

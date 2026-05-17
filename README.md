@@ -116,6 +116,7 @@ Sample `pulci status --json` output:
 ```json
 {
   "schema_version": 1,
+  "state_version": 7,
   "timestamp": "2026-05-16T12:00:00Z",
   "summary": { "errors": 2, "warnings": 1, "checks_run": 3, "stale": false },
   "tools": [

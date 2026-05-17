@@ -14,7 +14,10 @@ static STATE_VERSION: AtomicU64 = AtomicU64::new(0);
 
 /// Return the next monotonic state version. Each call increments the counter.
 pub fn next_state_version() -> u64 {
-    STATE_VERSION.fetch_add(1, Ordering::SeqCst)
+    // Relaxed is sufficient: we only need uniqueness, not ordering relative
+    // to other memory operations. The JSON write that follows is the real
+    // synchronisation barrier for consumers reading state.json.
+    STATE_VERSION.fetch_add(1, Ordering::Relaxed)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

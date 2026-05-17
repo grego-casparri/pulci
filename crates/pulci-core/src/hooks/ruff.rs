@@ -38,26 +38,29 @@ impl Hook for RuffAdapter {
     fn run(&self, files: &[PathBuf]) -> anyhow::Result<Vec<Diagnostic>> {
         let (bin, prefix_args) = self.invocation
             .split_first()
-            .expect("invocation is always non-empty");
+            .ok_or_else(|| anyhow::anyhow!("ruff invocation vector is empty"))?;
         let output = Command::new(bin)
             .args(prefix_args)
             .args(["check", "--output-format=json"])
             .args(files)
             .output()?;
 
-        if output.status.code().is_some_and(|c| c > 1) {
+        // code() is None when the process was killed by a signal — treat as error.
+        // ruff exit 0 = clean, exit 1 = violations found, exit > 1 = internal error.
+        if output.status.code().is_none_or(|c| c > 1) {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("ruff failed (exit {}): {stderr}", output.status);
         }
 
-        Ok(parse_ruff_json(&output.stdout))
+        parse_ruff_json(&output.stdout)
     }
 }
 
 /// Parse ruff's JSON stdout into diagnostics. Pure function — testable without subprocess.
-pub(crate) fn parse_ruff_json(stdout: &[u8]) -> Vec<Diagnostic> {
-    let entries: Vec<RuffEntry> = serde_json::from_slice(stdout).unwrap_or_default();
-    entries
+pub(crate) fn parse_ruff_json(stdout: &[u8]) -> anyhow::Result<Vec<Diagnostic>> {
+    let entries: Vec<RuffEntry> = serde_json::from_slice(stdout)
+        .map_err(|e| anyhow::anyhow!("failed to parse ruff JSON output: {e}"))?;
+    Ok(entries
         .into_iter()
         .map(|e| Diagnostic {
             tool: "ruff".into(),
@@ -68,7 +71,7 @@ pub(crate) fn parse_ruff_json(stdout: &[u8]) -> Vec<Diagnostic> {
             code: e.code,
             message: e.message,
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -90,7 +93,7 @@ mod tests {
 
     #[test]
     fn parse_single_violation() {
-        let diags = parse_ruff_json(SAMPLE_JSON);
+        let diags = parse_ruff_json(SAMPLE_JSON).unwrap();
         assert_eq!(diags.len(), 1);
         let d = &diags[0];
         assert_eq!(d.tool, "ruff");
@@ -103,13 +106,12 @@ mod tests {
 
     #[test]
     fn parse_empty_array() {
-        let diags = parse_ruff_json(b"[]");
+        let diags = parse_ruff_json(b"[]").unwrap();
         assert!(diags.is_empty());
     }
 
     #[test]
-    fn parse_malformed_json_returns_empty() {
-        let diags = parse_ruff_json(b"not json");
-        assert!(diags.is_empty());
+    fn parse_malformed_json_returns_error() {
+        assert!(parse_ruff_json(b"not json").is_err());
     }
 }

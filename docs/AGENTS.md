@@ -148,7 +148,7 @@ If you start the daemon yourself (rather than having the user start it), use
 `--agent` mode:
 
 ```bash
-pulci start --agent /path/to/project
+pulci start /path/to/project --agent
 ```
 
 Each check emits one JSON line to stdout:

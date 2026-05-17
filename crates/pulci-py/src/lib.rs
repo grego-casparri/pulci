@@ -98,6 +98,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
 
     // Determine stale: tools changed since last daemon run?
     let mut stale = read_state(&state_file)
+        .map_err(|e| eprintln!("pulci: warning: could not read prior state for stale check: {e}"))
         .ok()
         .is_some_and(|prev| pulci_core::state::tools_changed(&prev.tools, &tool_infos));
 

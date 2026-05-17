@@ -84,6 +84,13 @@ mod tests {
     }
 
     #[test]
+    fn ignores_pulci_state_dir() {
+        // Writing state.json must not trigger a re-check loop.
+        assert!(is_ignored(Path::new(".pulci/state.json")));
+        assert!(is_ignored(Path::new(".pulci/state.json.tmp")));
+    }
+
+    #[test]
     fn ignores_pycache() {
         assert!(is_ignored(Path::new("src/__pycache__/foo.pyc")));
     }

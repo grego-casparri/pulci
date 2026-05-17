@@ -51,11 +51,16 @@ impl Hook for CargoAdapter {
     fn run(&self, _files: &[PathBuf]) -> anyhow::Result<Vec<Diagnostic>> {
         let (bin, prefix_args) = self.invocation
             .split_first()
-            .expect("invocation is always non-empty");
+            .ok_or_else(|| anyhow::anyhow!("cargo invocation vector is empty"))?;
         let output = Command::new(bin)
             .args(prefix_args)
             .args(["clippy", "--workspace", "--message-format=json", "--", "-D", "warnings"])
             .output()?;
+        // clippy exits non-zero when warnings/errors are found (-D warnings), so we parse
+        // stdout regardless of exit status. A None code (signal kill) is a real failure.
+        if output.status.code().is_none() {
+            anyhow::bail!("cargo clippy was killed by a signal");
+        }
         Ok(parse_clippy_json(&output.stdout))
     }
 }

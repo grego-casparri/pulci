@@ -21,12 +21,19 @@ impl Hook for TyAdapter {
     fn run(&self, files: &[PathBuf]) -> anyhow::Result<Vec<Diagnostic>> {
         let (bin, prefix_args) = self.invocation
             .split_first()
-            .expect("invocation is always non-empty");
+            .ok_or_else(|| anyhow::anyhow!("ty invocation vector is empty"))?;
         let output = Command::new(bin)
             .args(prefix_args)
             .arg("check")
             .args(files)
             .output()?;
+
+        // ty exit 0 = clean, exit 1 = type errors found, exit > 1 = internal error.
+        // code() is None when killed by signal — treat as error in both cases.
+        if output.status.code().is_none_or(|c| c > 1) {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("ty check failed (exit {}): {stderr}", output.status);
+        }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         Ok(parse_ty_output(&stdout))

@@ -42,10 +42,11 @@ def write_state(cwd: pathlib.Path, state: dict) -> None:
     state_file.write_text(json.dumps(state))
 
 
-def test_status_no_state_file_exits_nonzero() -> None:
+def test_status_no_state_file_exits_zero_with_hint() -> None:
+    # No daemon running → not an error condition; exits 0 with a hint message.
     with runner.isolated_filesystem():
         result = runner.invoke(app, ["status"])
-    assert result.exit_code != 0
+    assert result.exit_code == 0
 
 
 def test_status_human_output() -> None:
