@@ -6,19 +6,63 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-05-17
+
+Robustness pass focused on failure modes an agent would notice but a
+human might miss: silent staleness, hung hooks, racing daemons, and the
+"healthy heartbeat with frozen state" combination that misleads
+consumers. New `tool_errors` field surfaces non-diagnostic hook failures
+explicitly so absence of diagnostics is no longer ambiguous. Architecture
+invariants and public contracts are now documented in `docs/ARCHITECTURE.md`.
+
+### Added
+- Single-instance daemon: `pulci start` acquires an advisory exclusive lock on
+  `.pulci/daemon.lock` (`fs2::FileExt::try_lock_exclusive`) before any other I/O.
+  A second `pulci start` over the same project root fails fast with an actionable
+  message (`"another pulci daemon is already running for this project"`).
+- Per-hook timeout: `hooks::run_with_timeout` spawns each hook subprocess, drains
+  stdout/stderr in background threads to avoid pipe-full deadlock, and kills the
+  child after `DEFAULT_HOOK_TIMEOUT` (120 s). Prevents the daemon from freezing
+  when a tool hangs (uvx network stall, deadlocked child, infinite-loop user code
+  under pytest).
+- `tool_errors` field in `state.json`: aggregates non-diagnostic hook failures
+  (timeout, signal kill, parser crash) into a structured array. Agents can now
+  distinguish "tool ran clean" from "tool never produced a verdict". `pulci status`
+  human output gains a "Tool errors" section when non-empty. Field is additive
+  (`#[serde(default)]` for backward compat on stale-detection reads).
+- Daemon heartbeat: `pulci start` writes `.pulci/heartbeat` every 10 s from a
+  background thread, independent of check activity. `pulci status` derives
+  `daemon_status` (`alive` / `stale_heartbeat` / `dead`) from the heartbeat age,
+  with thresholds 30 s and 120 s. No PID files, no false positives on long checks.
+- `pulci status` (human and `--json`) now includes `daemon_status`,
+  `daemon_heartbeat_at`, and `age` (`heartbeat_seconds_ago`, `last_check_seconds_ago`).
+- `pulci_status` MCP tool returns `{"status": "not_running"}` immediately on the
+  blocking path (`since_version`) when the daemon heartbeat is dead, instead of
+  waiting for the full timeout.
+- `[watch] exclude` config in `pulci.toml`: paths listed here (relative to the
+  project root) are skipped by both the initial scan and all file-change events.
+  Useful for fixture or vendor directories that contain intentional violations.
+  Example: `exclude = ["benchmarks/fixture"]`.
+- "Invariants and guarantees" section in `docs/ARCHITECTURE.md` documenting the
+  load-bearing properties contributors and integrators must preserve: atomic
+  state writes, monotonic `state_version`, single-instance guarantee,
+  paralelism constant, debounce window, hook timeout, exit codes contract,
+  schema versioning policy, watcher ignore list, and rescan-on-overflow.
+- Regression-test policy section in `CONTRIBUTING.md`: every bug fix lands with
+  a test that fails pre-fix.
+- Benchmark fixture expanded to 28 files including `tests/test_utils.py`, giving
+  the benchmark's steady-state touch target (`sampleapp/utils.py`) a real
+  corresponding test file so all three hooks exercise meaningful work.
+
+### Changed
+- Moved filesystem scan logic (`is_excluded`, `collect_py_files`, and a new
+  `is_source_file` helper) from `crates/pulci-py` to `crates/pulci-core::scan`.
+  The crate boundary now matches its claim — `pulci-core` is pure Rust with no
+  PyO3 dependency, reusable by future non-Python consumers. No behavior change;
+  net -32 lines from `pulci-py/src/lib.rs`, +13 Rust unit tests in `pulci-core`
+  exercising the scan logic without spinning up Python.
+
 ### Fixed
-- Daemon aborts cleanly after 3 consecutive `state.json` write failures (disk
-  full, permissions revoked, FS gone read-only). Previously the daemon
-  logged the error and kept running, leaving consumers with a fresh
-  heartbeat and stale state — the worst combination because it looks
-  healthy. Successful write resets the counter; transient failures don't
-  trigger the bail.
-- `pulci.toml` pin to a non-existent version (typo or unpublished) now bails at
-  daemon startup with a clear message naming the pin, the failing uvx invocation,
-  and the tool's stderr. Previously the daemon started cleanly and the user
-  saw a confusing "tool not found" on every save until they noticed the typo.
-  Implementation: resolver probes `uvx <tool>@<version> --version` for the
-  pinned path and propagates the failure as an actionable error.
 - Watcher now triggers a full project rescan when `notify` reports an inotify
   queue overflow (`event.need_rescan()`). Previously the overflow event arrived
   as an `Event` with empty `paths` and was silently dropped — the daemon kept
@@ -26,6 +70,17 @@ Version scheme: [Semantic Versioning](https://semver.org/).
   stale relative to disk with no signal to consumers. `FileEvent` is now an
   enum (`Changed { path, kind }` / `Rescan`) and the event loop routes `Rescan`
   to the same scan logic used at startup.
+- Daemon aborts cleanly after 3 consecutive `state.json` write failures (disk
+  full, permissions revoked, FS gone read-only). Previously the daemon logged
+  the error and kept running, leaving consumers with a fresh heartbeat and stale
+  state — the worst combination because it looks healthy. Successful write resets
+  the counter; transient failures don't trigger the bail.
+- `pulci.toml` pin to a non-existent version (typo or unpublished) now bails at
+  daemon startup with a clear message naming the pin, the failing uvx invocation,
+  and the tool's stderr. Previously the daemon started cleanly and the user
+  saw a confusing "tool not found" on every save until they noticed the typo.
+  Implementation: resolver probes `uvx <tool>@<version> --version` for the
+  pinned path and propagates the failure as an actionable error.
 - Event loop now filters watcher events to `.py` files (and `.rs` when clippy is
   enabled) before passing them to hooks. Previously, atomic-write temp files
   (e.g. `file.tmp.<pid>.<hash>`) triggered a ruff check that returned E902
@@ -36,52 +91,8 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 - Watcher now ignores `.ruff_cache/`, `.pytest_cache/`, and `pytest-cache-files-*`
   directories. Previously, ruff and pytest writing their caches inside the watched
   tree triggered spurious re-check cycles that overwrote the real state.json.
-
-### Added
-- `[watch] exclude` config in `pulci.toml`: paths listed here (relative to the
-  project root) are skipped by both the initial scan and all file-change events.
-  Useful for fixture or vendor directories that contain intentional violations.
-  Example: `exclude = ["benchmarks/fixture"]`.
-- Benchmark fixture expanded to 28 files including `tests/test_utils.py`, giving
-  the benchmark's steady-state touch target (`sampleapp/utils.py`) a real
-  corresponding test file so all three hooks exercise meaningful work.
 - Benchmark `_fixture_stats` now correctly counts test failures via `-v` and
   regex, replacing the broken quiet-mode heuristic.
-
-### Changed
-- Moved filesystem scan logic (`is_excluded`, `collect_py_files`, and a new
-  `is_source_file` helper) from `crates/pulci-py` to `crates/pulci-core::scan`.
-  The crate boundary now matches its claim — `pulci-core` is pure Rust with no
-  PyO3 dependency, reusable by future non-Python consumers. No behavior change;
-  net -32 lines from `pulci-py/src/lib.rs`, +13 Rust unit tests in `pulci-core`
-  exercising the scan logic without spinning up Python.
-
-### Added
-- `tool_errors` field in `state.json`: aggregates non-diagnostic hook failures
-  (timeout, signal kill, parser crash) into a structured array. Closes the
-  residual gap from the per-hook timeout work — agents can now distinguish
-  "tool ran clean" from "tool never produced a verdict". `pulci status` human
-  output gains a "Tool errors" section when non-empty. Field is additive
-  (`#[serde(default)]` for backward compat on stale-detection reads).
-- Single-instance daemon: `pulci start` acquires an advisory exclusive lock on
-  `.pulci/daemon.lock` (`fs2::FileExt::try_lock_exclusive`) before any other I/O.
-  A second `pulci start` over the same project root fails fast with an actionable
-  message (`"another pulci daemon is already running for this project"`).
-- Per-hook timeout: `hooks::run_with_timeout` spawns each hook subprocess, drains
-  stdout/stderr in background threads to avoid pipe-full deadlock, and kills the
-  child after `DEFAULT_HOOK_TIMEOUT` (120 s). Prevents the daemon from freezing
-  when a tool hangs (uvx network stall, deadlocked child, infinite-loop user code
-  under pytest). The error is captured by the orchestrator; `state.json` keeps
-  advancing rather than staying frozen with a fresh heartbeat.
-- Daemon heartbeat: `pulci start` writes `.pulci/heartbeat` every 10 s from a
-  background thread, independent of check activity. `pulci status` derives
-  `daemon_status` (`alive` / `stale_heartbeat` / `dead`) from the heartbeat age,
-  with thresholds 30 s and 120 s. No PID files, no false positives on long checks.
-- `pulci status` (human and `--json`) now includes `daemon_status`,
-  `daemon_heartbeat_at`, and `age` (`heartbeat_seconds_ago`, `last_check_seconds_ago`).
-- `pulci_status` MCP tool returns `{"status": "not_running"}` immediately on the
-  blocking path (`since_version`) when the daemon heartbeat is dead, instead of
-  waiting for the full timeout.
 
 ## [0.0.2] - 2026-05-17
 

@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "pulci-core"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "anyhow",
  "notify",
@@ -264,7 +264,7 @@ dependencies = [
 
 [[package]]
 name = "pulci-py"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "fs2",
  "pulci-core",
