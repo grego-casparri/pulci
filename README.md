@@ -65,9 +65,9 @@ invoking ruff/ty/pytest directly.
 
 ## For AI agents
 
-If you are an AI coding agent, start here: **[docs/AGENTS.md](docs/AGENTS.md)**
+AI coding agents (Claude Code, Cursor, Codex) should start at **[docs/AGENTS.md](docs/AGENTS.md)**.
 
-The short version: run `pulci start --agent` once, then call `pulci status --json` after each edit instead of invoking ruff/ty/pytest directly.
+The short version: run `pulci start` once, then call `pulci status --json` after each edit instead of invoking ruff/ty/pytest directly.
 
 ## Install
 
@@ -93,10 +93,10 @@ uv run pulci --version
 ```bash
 pulci start                   # watches current directory, human output
 pulci start /path/to/project  # explicit root
-pulci start --agent           # compact JSON events — use this in agent loops
+pulci start --agent           # suppress startup messages; structured exit events
 ```
 
-**Agent mode output** — compiler-style diagnostics, one per line:
+**Output** — compiler-style diagnostics, one per line (same in both modes):
 
 ```
 src/foo.py:12:1: error[ruff/F401] 'os' imported but unused

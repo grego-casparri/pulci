@@ -68,7 +68,7 @@ implementing the `Hook` trait.
 3. Handle `ErrorKind::NotFound` gracefully (tool not installed → return empty Vec, don't error)
 4. Add `pub mod <toolname>;` to `crates/pulci-core/src/hooks/mod.rs`
 5. Wire it up in `crates/pulci-py/src/lib.rs` behind a `config.hooks.<toolname>` flag
-6. Add the flag to `HooksConfig` in `crates/pulci-core/src/config.rs` with an appropriate default
+6. Add the flag to `HooksConfig` in `crates/pulci-core/src/config.rs`. Default to `true` only if the tool is universally present in Python projects (like ruff/ty); default to `false` if it requires extra setup or is language-specific (like pytest, clippy)
 7. Write unit tests for the pure parser function (`parse_<toolname>_output`)
 
 See `crates/pulci-core/src/hooks/ruff.rs` as the canonical example.

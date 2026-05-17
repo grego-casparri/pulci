@@ -98,7 +98,9 @@ If the daemon is not running, the tool returns:
 ```
 
 This is **not** an error — handle it by informing the user to start the daemon.
-The tool never returns `isError: true` for a missing daemon.
+The tool never sets `isError: true` (the MCP protocol field that marks a tool
+call as failed) for a missing daemon. A missing daemon is a valid state, not a
+tool failure.
 
 ### Causal synchronisation: wait_for_file + since_version
 
@@ -106,7 +108,7 @@ The tool never returns `isError: true` for a missing daemon.
 
 | Parameter        | Type         | Default | Description                                                        |
 |------------------|--------------|---------|--------------------------------------------------------------------|
-| `wait_for_file`  | `str \| None` | `None`  | Block until a result covering this file is available.              |
+| `wait_for_file`  | `str \| None` | `None`  | Semantic hint: the file you just edited. The daemon produces global state (not per-file), so the actual wait is driven by `since_version`. Always pair with it. |
 | `since_version`  | `int \| None` | `None`  | Block until `state_version > since_version`.                       |
 | `timeout_ms`     | `int`        | `5000`  | Max wait in ms. Returns `{"status": "timeout"}` if exceeded.       |
 
@@ -151,10 +153,11 @@ If you start the daemon yourself (rather than having the user start it), use
 pulci start /path/to/project --agent
 ```
 
-Each check emits one JSON line to stdout:
-```json
-{"event":"check","files":2,"errors":1,"warnings":0,"checks_run":2,"stale":false}
-```
+`--agent` suppresses the human-readable startup messages ("resolved: ...", "Watching ...").
+Diagnostic output is always compiler-style regardless of mode — read state via
+`pulci status --json`, not by parsing stdout.
+
+Structured exit events are emitted to stdout on lifecycle changes:
 
 On Ctrl-C or graceful stop:
 ```json
@@ -176,10 +179,11 @@ was updated in the venv). The daemon detected the change and re-resolved tools.
 When `stale` is true, treat the current diagnostics as a full re-check, not an
 incremental one. It returns to `false` on the next check pass.
 
-**No initial scan:** pulci does not scan existing files on startup. `state.json`
-is only written after the first filesystem change event. If `pulci status`
-returns "No state available", make any small change to a watched file to
-trigger the first check.
+**No state until first change:** pulci does not scan existing files on startup —
+it only runs checks when a file actually changes. `state.json` is written after
+the first filesystem change event. If `pulci status` returns no state, touch any
+source file to trigger the first check. This is a trade-off: fast daemon startup
+at the cost of no baseline state until the first edit.
 
 ## What pulci is not
 
