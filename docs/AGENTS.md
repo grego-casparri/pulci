@@ -157,6 +157,20 @@ pulci start /path/to/project --agent
 Diagnostic output is always compiler-style regardless of mode — read state via
 `pulci status --json`, not by parsing stdout.
 
+### Single-instance guarantee
+
+Only one pulci daemon may watch a given project path at a time. The daemon
+acquires an advisory exclusive lock on `.pulci/daemon.lock` at startup. If
+you launch a second `pulci start` against a project that already has a live
+daemon, the second invocation exits non-zero with a message like:
+
+```
+another pulci daemon is already running for this project (lock: .pulci/daemon.lock)
+```
+
+The lock is released automatically when the daemon process exits (clean
+shutdown, signal, or crash). No manual cleanup is required.
+
 Structured exit events are emitted to stdout on lifecycle changes:
 
 On Ctrl-C or graceful stop:

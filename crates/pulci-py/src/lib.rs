@@ -9,6 +9,7 @@
 #![allow(clippy::useless_conversion)]
 
 use std::collections::HashSet;
+use std::fs::OpenOptions;
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::path::Path;
@@ -17,6 +18,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use fs2::FileExt;
 use pyo3::prelude::*;
 
 fn write_heartbeat(path: &Path) {
@@ -102,7 +104,35 @@ fn collect_py_files_inner(dir: &Path, project_root: &Path, excludes: &[String], 
 #[pyfunction]
 fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
     let project_root = PathBuf::from(&path);
-    let state_file = project_root.join(".pulci").join("state.json");
+    let pulci_dir = project_root.join(".pulci");
+    let state_file = pulci_dir.join("state.json");
+
+    // Acquire an advisory exclusive lock on .pulci/daemon.lock so a second
+    // `pulci start` against the same project fails fast instead of racing on
+    // state.json / heartbeat. The kernel releases the lock when this process
+    // exits (clean or via signal); the `_lock_file` binding keeps the FD alive
+    // for the lifetime of start().
+    std::fs::create_dir_all(&pulci_dir)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
+            format!("failed to create .pulci directory: {e}")
+        ))?;
+    let lock_path = pulci_dir.join("daemon.lock");
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
+            format!("failed to open lock file {}: {e}", lock_path.display())
+        ))?;
+    if let Err(e) = lock_file.try_lock_exclusive() {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+            "another pulci daemon is already running for this project (lock: {}): {e}",
+            lock_path.display()
+        )));
+    }
+    let _lock_file = lock_file;
 
     let config = load_config(&project_root).unwrap_or_else(|e| {
         eprintln!("pulci: warning: failed to load pulci.toml ({e}), using defaults");
@@ -331,4 +361,60 @@ fn _native(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(start, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_tmp_lock() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let dir = std::env::temp_dir().join(format!("pulci_lock_test_{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("daemon.lock")
+    }
+
+    #[test]
+    fn second_try_lock_on_same_path_fails() {
+        let lock_path = unique_tmp_lock();
+
+        let first = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        first.try_lock_exclusive().unwrap();
+
+        let second = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        let result = second.try_lock_exclusive();
+        assert!(
+            result.is_err(),
+            "expected second try_lock_exclusive to fail while first lock is held"
+        );
+
+        // Drop the first lock; a fresh acquisition should now succeed.
+        drop(first);
+        let third = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        third.try_lock_exclusive().unwrap();
+
+        std::fs::remove_dir_all(lock_path.parent().unwrap()).ok();
+    }
 }

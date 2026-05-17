@@ -30,6 +30,10 @@ Version scheme: [Semantic Versioning](https://semver.org/).
   regex, replacing the broken quiet-mode heuristic.
 
 ### Added
+- Single-instance daemon: `pulci start` acquires an advisory exclusive lock on
+  `.pulci/daemon.lock` (`fs2::FileExt::try_lock_exclusive`) before any other I/O.
+  A second `pulci start` over the same project root fails fast with an actionable
+  message (`"another pulci daemon is already running for this project"`).
 - Daemon heartbeat: `pulci start` writes `.pulci/heartbeat` every 10 s from a
   background thread, independent of check activity. `pulci status` derives
   `daemon_status` (`alive` / `stale_heartbeat` / `dead`) from the heartbeat age,

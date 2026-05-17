@@ -15,4 +15,5 @@ crate-type = ["cdylib"]
 [dependencies]
 pulci-core = { path = "../pulci-core" }
 pyo3 = { version = "0.22" }
+fs2.workspace = true
 tokio.workspace = true
