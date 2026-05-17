@@ -259,6 +259,10 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                 let files: Vec<PathBuf> = paths
                     .into_iter()
                     .filter(|p| !is_excluded(p, &project_root_for_scan, &config.watch.exclude))
+                    .filter(|p| {
+                        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        ext == "py" || (config.hooks.clippy && ext == "rs")
+                    })
                     .collect();
                 let changed = cache.filter_changed(&files);
                 if changed.is_empty() {

@@ -7,6 +7,10 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Event loop now filters watcher events to `.py` files (and `.rs` when clippy is
+  enabled) before passing them to hooks. Previously, atomic-write temp files
+  (e.g. `file.tmp.<pid>.<hash>`) triggered a ruff check that returned E902
+  because the temp file was already renamed before ruff opened it.
 - `PytestAdapter` now resolves test-file paths relative to the project root and
   sets `Command::current_dir` to the project root, so pytest actually runs when
   the daemon is started from a directory other than the watched project.
