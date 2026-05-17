@@ -7,6 +7,12 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Daemon aborts cleanly after 3 consecutive `state.json` write failures (disk
+  full, permissions revoked, FS gone read-only). Previously the daemon
+  logged the error and kept running, leaving consumers with a fresh
+  heartbeat and stale state — the worst combination because it looks
+  healthy. Successful write resets the counter; transient failures don't
+  trigger the bail.
 - `pulci.toml` pin to a non-existent version (typo or unpublished) now bails at
   daemon startup with a clear message naming the pin, the failing uvx invocation,
   and the tool's stderr. Previously the daemon started cleanly and the user

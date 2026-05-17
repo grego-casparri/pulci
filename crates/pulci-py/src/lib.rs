@@ -233,6 +233,12 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
     let orchestrator = Orchestrator::new(hook_list);
     let mut cache = FileCache::new();
 
+    // Track consecutive write_state failures. After this many in a row the daemon
+    // aborts rather than continue serving stale state with a fresh heartbeat —
+    // exactly the worst signal an agent could read. Successful write resets to 0.
+    const MAX_CONSECUTIVE_WRITE_ERRORS: u32 = 3;
+    let mut consecutive_write_errors: u32 = 0;
+
     // Initial full-project scan so state.json exists before the first file event.
     {
         let all_py = collect_py_files(&project_root_for_scan, &project_root_for_scan, &config.watch.exclude);
@@ -263,8 +269,18 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                 changed.len(),
                 elapsed,
             );
-            if let Err(e) = write_state(&state_file, &state) {
-                eprintln!("pulci: failed to write initial state: {e}");
+            match write_state(&state_file, &state) {
+                Ok(()) => { consecutive_write_errors = 0; }
+                Err(e) => {
+                    eprintln!("pulci: failed to write initial state: {e}");
+                    consecutive_write_errors += 1;
+                    if consecutive_write_errors >= MAX_CONSECUTIVE_WRITE_ERRORS {
+                        return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                            "pulci aborting: {MAX_CONSECUTIVE_WRITE_ERRORS} consecutive state.json writes failed. Last error: {e}. \
+                             Check disk space and .pulci/ permissions."
+                        )));
+                    }
+                }
             }
         }
     }
@@ -345,8 +361,18 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                     elapsed,
                 );
 
-                if let Err(e) = write_state(&state_file, &state) {
-                    eprintln!("pulci: failed to write state: {e}");
+                match write_state(&state_file, &state) {
+                    Ok(()) => { consecutive_write_errors = 0; }
+                    Err(e) => {
+                        eprintln!("pulci: failed to write state: {e}");
+                        consecutive_write_errors += 1;
+                        if consecutive_write_errors >= MAX_CONSECUTIVE_WRITE_ERRORS {
+                            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                                "pulci aborting: {MAX_CONSECUTIVE_WRITE_ERRORS} consecutive state.json writes failed. Last error: {e}. \
+                                 Check disk space and .pulci/ permissions."
+                            )));
+                        }
+                    }
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
