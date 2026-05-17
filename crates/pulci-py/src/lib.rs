@@ -9,6 +9,7 @@
 #![allow(clippy::useless_conversion)]
 
 use std::collections::HashSet;
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -100,7 +101,22 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         .ok()
         .is_some_and(|prev| pulci_core::state::tools_changed(&prev.tools, &tool_infos));
 
-    // Print resolved tools (human mode only).
+    let config_watcher = WatcherConfig { path: project_root };
+    let (tx, rx) = mpsc::channel();
+    let (watcher_err_tx, watcher_err_rx) = mpsc::channel::<String>();
+    let (ready_tx, ready_rx) = mpsc::channel::<()>();
+
+    std::thread::spawn(move || {
+        if let Err(e) = watch(config_watcher, tx, ready_tx) {
+            let _ = watcher_err_tx.send(e.to_string());
+        }
+    });
+
+    // Wait until inotify watches are registered before printing "Watching".
+    // This ensures piped readers (tests, CI) get the message only after
+    // the watcher is genuinely ready to receive events.
+    let _ = ready_rx.recv_timeout(Duration::from_secs(5));
+
     if !agent {
         if !tool_infos.is_empty() {
             let summary = tool_infos
@@ -111,17 +127,8 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
             println!("resolved: {summary}");
         }
         println!("Watching {path} — press Ctrl-C to stop.");
+        let _ = std::io::stdout().flush();
     }
-
-    let config_watcher = WatcherConfig { path: project_root };
-    let (tx, rx) = mpsc::channel();
-    let (watcher_err_tx, watcher_err_rx) = mpsc::channel::<String>();
-
-    std::thread::spawn(move || {
-        if let Err(e) = watch(config_watcher, tx) {
-            let _ = watcher_err_tx.send(e.to_string());
-        }
-    });
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)

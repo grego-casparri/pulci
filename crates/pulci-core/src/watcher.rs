@@ -34,7 +34,12 @@ pub fn is_ignored(path: &Path) -> bool {
 }
 
 /// Blocks until `tx` is dropped, forwarding non-ignored filesystem events.
-pub fn watch(config: WatcherConfig, tx: mpsc::Sender<FileEvent>) -> anyhow::Result<()> {
+/// Sends `()` on `ready_tx` once the filesystem watch is registered.
+pub fn watch(
+    config: WatcherConfig,
+    tx: mpsc::Sender<FileEvent>,
+    ready_tx: mpsc::Sender<()>,
+) -> anyhow::Result<()> {
     let (notify_tx, notify_rx) = mpsc::channel();
 
     let mut watcher = recommended_watcher(move |res| {
@@ -45,6 +50,8 @@ pub fn watch(config: WatcherConfig, tx: mpsc::Sender<FileEvent>) -> anyhow::Resu
     watcher
         .watch(&config.path, RecursiveMode::Recursive)
         .with_context(|| format!("failed to watch {}", config.path.display()))?;
+
+    let _ = ready_tx.send(());
 
     loop {
         match notify_rx.recv() {
