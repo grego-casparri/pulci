@@ -41,13 +41,18 @@ pulci does **not** replace any of these. It fills the empty quadrant.
 
 pulci ships an MCP server for Claude Desktop, Cursor, and any MCP-compatible host.
 
+**Auto-install** (recommended) — writes the entry into the host's config file directly, preserving any other MCP servers you have:
+
 ```bash
-pulci mcp info          # prints the config block to paste into your host
-pulci mcp               # starts the server (stdio)
-pulci mcp /path/to/project  # explicit project root
+pulci mcp install claude-desktop      # ~/Library/Application Support/Claude/...
+pulci mcp install cursor              # .cursor/mcp.json (project-local)
+pulci mcp install cursor --global     # ~/.cursor/mcp.json (all projects)
+pulci mcp install cursor --dry-run    # preview without writing
 ```
 
-`pulci mcp info` output (paste into `claude_desktop_config.json` or `.cursor/mcp.json`):
+For Claude Code, use its native `claude mcp add pulci $(which pulci) mcp` instead.
+
+**Manual setup** — `pulci mcp info` prints the JSON block you can paste yourself:
 
 ```json
 {
@@ -62,6 +67,49 @@ pulci mcp /path/to/project  # explicit project root
 
 Once configured, the host exposes the `pulci_status` tool — agents call it instead of
 invoking ruff/ty/pytest directly.
+
+## Real example: what the agent loop looks like
+
+I built pulci because I wanted my own Claude Code sessions to stop wasting tokens re-invoking ruff after every edit. Here is the actual loop:
+
+**Before pulci** — each edit pays the cold start of every tool, the agent re-parses the output, and the diagnostic stream grows linearly with violation count:
+
+```text
+agent: edit src/api.py
+agent: $ ruff check src/api.py
+        ... 2391 tokens of JSON ...
+agent: $ ty check src/api.py
+        ... more tokens ...
+agent: parse, decide next action
+```
+
+**With pulci** — the daemon already ran the checks in the background. The agent reads `state_version` before the edit, waits for it to advance after, then reads a single structured response:
+
+```python
+# 1. Capture the version before editing
+v = (await pulci_status())["state_version"]
+
+# 2. Make the edit (write_file, replace_in_file, whatever)
+edit_file("src/api.py", "...")
+
+# 3. Wait for the daemon to process it — no polling, no fixed sleeps
+result = await pulci_status(since_version=v)
+
+# 4. Branch on the structured response
+if result.get("tool_errors"):
+    # A hook timed out or crashed — retry or surface
+    ...
+elif result["summary"]["errors"] > 0:
+    # Real diagnostics; iterate
+    for d in result["diagnostics"]:
+        ...
+else:
+    # Clean. Move on.
+```
+
+In the benchmark fixture (28 files, all hooks enabled), pulci's per-iteration cost is **339 tokens vs 2391** for the manual invocation flow — a 7× reduction, freeing the agent's context window for actual reasoning. The latency is also lower (329 ms vs 466 ms) because the daemon stays warm between checks.
+
+The MCP tool docstring documents the exact response shapes for `not_running`, `running_no_checks_yet`, `timeout`, `error`, and `tool_errors` so an agent can branch cleanly on each — see [`docs/AGENTS.md`](docs/AGENTS.md#handling-edge-cases) for the full table.
 
 ## For AI agents
 

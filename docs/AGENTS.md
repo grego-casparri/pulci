@@ -8,14 +8,21 @@ is what you want.
 
 ## MCP setup (recommended)
 
-If your host supports MCP (Claude Desktop, Cursor, Claude Code), run:
+If your host supports MCP (Claude Desktop, Cursor), pulci can install itself:
 
 ```bash
-pulci mcp info
+pulci mcp install claude-desktop      # writes to ~/Library/Application Support/Claude/...
+pulci mcp install cursor              # writes to .cursor/mcp.json (project-local)
+pulci mcp install cursor --global     # writes to ~/.cursor/mcp.json (all projects)
 ```
 
-Paste the printed config into your host's MCP config file. The host will expose
-the `pulci_status` tool automatically — no manual CLI calls needed.
+The installer merges into existing `mcpServers` entries (preserves other servers
+you have configured) and writes atomically (tmp + rename). Add `--dry-run` to
+preview without touching disk.
+
+For Claude Code: use its native `claude mcp add pulci $(which pulci) mcp`.
+
+If you'd rather paste the config block manually, `pulci mcp info` prints it.
 
 ## The contract
 

@@ -214,7 +214,13 @@ def status(
 @_mcp_app.callback()
 def mcp_cmd(
     ctx: typer.Context,
-    path: Annotated[str, typer.Argument(help="Project root to serve state from.")] = ".",
+    path: Annotated[
+        str,
+        typer.Option(
+            "--path",
+            help="Project root to serve state from. Defaults to the current directory.",
+        ),
+    ] = ".",
     transport: Annotated[
         Literal["stdio"],
         typer.Option("--transport", help="MCP transport protocol."),
@@ -225,8 +231,12 @@ def mcp_cmd(
 
     Exposes the pulci_status tool to any MCP-compatible host
     (Claude Desktop, Cursor, Claude Code). Run `pulci mcp info` to get
-    the config block to paste into your host.
+    the config block to paste into your host, or `pulci mcp install <host>`
+    to write the entry automatically.
     """
+    # `path` is an option (not a positional) so it does not shadow subcommand
+    # names — `pulci mcp info` and `pulci mcp install <host>` must remain
+    # routable to their commands.
     if ctx.invoked_subcommand is None:
         import os
 
@@ -236,7 +246,11 @@ def mcp_cmd(
             f"Starting pulci MCP server (stdio, project: {pathlib.Path(path).resolve()}).",
             err=True,
         )
-        typer.echo("Run `pulci mcp info` to get the config block for your MCP host.", err=True)
+        typer.echo(
+            "Run `pulci mcp info` to get the config block, or "
+            "`pulci mcp install <host>` to install it directly.",
+            err=True,
+        )
         _mcp_server.run(transport=transport)
 
 
@@ -248,6 +262,70 @@ def mcp_info(
     Print the MCP config block to paste into Claude Desktop or Cursor.
     """
     print_mcp_info(path)
+
+
+@_mcp_app.command("install")
+def mcp_install(
+    host: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Target host: claude-desktop or cursor. "
+                "For Claude Code, use `claude mcp add` directly."
+            ),
+        ),
+    ],
+    path: Annotated[
+        str,
+        typer.Argument(help="Project root pulci will watch (embedded in the args)."),
+    ] = ".",
+    global_scope: Annotated[
+        bool,
+        typer.Option(
+            "--global",
+            help="Cursor only: install into ~/.cursor/mcp.json instead of .cursor/mcp.json.",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Print the config that would be written; don't touch disk.",
+        ),
+    ] = False,
+) -> None:
+    """
+    Install pulci into a supported MCP host's config file.
+
+    Atomic-write (tmp + rename) preserves any existing `mcpServers` entries.
+    Refuses to overwrite a config file that is not valid JSON — fix the file
+    manually first.
+    """
+    from pulci.mcp_install import install
+
+    try:
+        result = install(
+            host,
+            project_path=path,
+            global_scope=global_scope,
+            dry_run=dry_run,
+        )
+    except (ValueError, RuntimeError) as exc:
+        typer.echo(f"pulci mcp install: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    config_path = result["path"]
+    if dry_run:
+        typer.echo(f"Would write to: {config_path}")
+        typer.echo("")
+        typer.echo(json.dumps(result["payload"], indent=2))
+        return
+
+    verb = "updated" if result["was_present"] else "installed"
+    typer.echo(f"pulci {verb} in {host} config:")
+    typer.echo(f"  {config_path}")
+    typer.echo("")
+    typer.echo(f"Restart {host} (or reload the MCP server list) to pick up the change.")
 
 
 if __name__ == "__main__":

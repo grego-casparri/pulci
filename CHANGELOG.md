@@ -6,6 +6,29 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `pulci mcp install <host>` — auto-installer for Claude Desktop and Cursor.
+  Locates the host's config file (per-OS for Claude Desktop, project-local
+  or `--global` for Cursor), merges the pulci entry into `mcpServers`
+  preserving any other entries, and writes atomically (tmp + rename).
+  `--dry-run` previews the merged config without writing. The installer
+  refuses to overwrite a config file that is not valid JSON. For Claude
+  Code, use its native `claude mcp add` command — wrapping it adds nothing.
+- README "Real example" section showing the concrete agent loop pulci was
+  designed for (capture `state_version` → edit → `pulci_status(since_version=v)`
+  → branch on the structured response), with the actual benchmark numbers
+  (339 vs 2391 tokens per iteration; 329 vs 466 ms latency).
+
+### Changed
+- `pulci mcp` callback now accepts the project root via `--path` instead of
+  a bare positional. This unblocks `pulci mcp info` and `pulci mcp install`
+  — the previous positional shadowed subcommand names, so neither was
+  reachable via the CLI even though both were registered. Configs that
+  used the default form (`args: ["mcp"]`) are unaffected. Configs with a
+  custom path that used the bare positional form (`args: ["mcp", "/path"]`)
+  need to be updated to the new form (`args: ["mcp", "--path", "/path"]`)
+  — `pulci mcp info` already emits the new form.
+
 ## [0.0.4] - 2026-05-17
 
 Robustness pass plus three user-facing config knobs. Hook subprocesses

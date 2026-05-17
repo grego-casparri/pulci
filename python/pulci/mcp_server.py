@@ -126,9 +126,12 @@ def print_mcp_info(path: str = ".") -> None:
     Print the MCP config block the user pastes into their host config.
     """
     pulci_bin = shutil.which("pulci") or str(pathlib.Path(sys.executable).parent / "pulci")
+    # `--path` rather than a bare positional: the mcp subcommand layer (info,
+    # install) needs subcommand names to NOT be shadowed by a positional path
+    # arg. Configs that omit a custom path stay as `args: ["mcp"]`.
     args: list[str] = ["mcp"]
     if path != ".":
-        args.append(path)
+        args.extend(["--path", path])
     config = {
         "mcpServers": {
             "pulci": {
