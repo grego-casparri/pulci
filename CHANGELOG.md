@@ -15,6 +15,10 @@ Version scheme: [Semantic Versioning](https://semver.org/).
   tree triggered spurious re-check cycles that overwrote the real state.json.
 
 ### Added
+- `[watch] exclude` config in `pulci.toml`: paths listed here (relative to the
+  project root) are skipped by both the initial scan and all file-change events.
+  Useful for fixture or vendor directories that contain intentional violations.
+  Example: `exclude = ["benchmarks/fixture"]`.
 - Benchmark fixture expanded to 28 files including `tests/test_utils.py`, giving
   the benchmark's steady-state touch target (`sampleapp/utils.py`) a real
   corresponding test file so all three hooks exercise meaningful work.

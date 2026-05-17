@@ -3,3 +3,6 @@ ruff   = true
 ty     = false
 pytest = false
 clippy = true
+
+[watch]
+exclude = ["benchmarks/fixture"]

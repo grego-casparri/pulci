@@ -62,14 +62,18 @@ fn version() -> &'static str {
     pulci_core::version()
 }
 
-/// Collect all `.py` files under `root`, skipping ignored directories.
-fn collect_py_files(root: &Path) -> Vec<PathBuf> {
+fn is_excluded(path: &Path, project_root: &Path, excludes: &[String]) -> bool {
+    excludes.iter().any(|excl| path.starts_with(project_root.join(excl)))
+}
+
+/// Collect all `.py` files under `root`, skipping ignored and excluded directories.
+fn collect_py_files(root: &Path, project_root: &Path, excludes: &[String]) -> Vec<PathBuf> {
     let mut result = Vec::new();
-    collect_py_files_inner(root, &mut result);
+    collect_py_files_inner(root, project_root, excludes, &mut result);
     result
 }
 
-fn collect_py_files_inner(dir: &Path, result: &mut Vec<PathBuf>) {
+fn collect_py_files_inner(dir: &Path, project_root: &Path, excludes: &[String], result: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -78,8 +82,11 @@ fn collect_py_files_inner(dir: &Path, result: &mut Vec<PathBuf>) {
         if pulci_core::watcher::is_ignored(&path) {
             continue;
         }
+        if is_excluded(&path, project_root, excludes) {
+            continue;
+        }
         if path.is_dir() {
-            collect_py_files_inner(&path, result);
+            collect_py_files_inner(&path, project_root, excludes, result);
         } else if path.extension().map(|e| e == "py").unwrap_or(false) {
             result.push(path);
         }
@@ -198,7 +205,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
 
     // Initial full-project scan so state.json exists before the first file event.
     {
-        let all_py = collect_py_files(&project_root_for_scan);
+        let all_py = collect_py_files(&project_root_for_scan, &project_root_for_scan, &config.watch.exclude);
         let changed = cache.filter_changed(&all_py);
         if !changed.is_empty() {
             let t0 = Instant::now();
@@ -249,7 +256,10 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                     }
                 }
 
-                let files: Vec<PathBuf> = paths.into_iter().collect();
+                let files: Vec<PathBuf> = paths
+                    .into_iter()
+                    .filter(|p| !is_excluded(p, &project_root_for_scan, &config.watch.exclude))
+                    .collect();
                 let changed = cache.filter_changed(&files);
                 if changed.is_empty() {
                     continue;

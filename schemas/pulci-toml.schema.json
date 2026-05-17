@@ -51,6 +51,19 @@
           "description": "Pin pytest to this version, e.g. \"8.3.0\". Uses uvx pytest@<version>."
         }
       }
+    },
+    "watch": {
+      "type": "object",
+      "description": "Controls which paths the daemon watches and scans.",
+      "additionalProperties": false,
+      "properties": {
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Relative paths (from project root) to exclude from watching. E.g. [\"benchmarks/fixture\"]."
+        }
+      }
     }
   }
 }

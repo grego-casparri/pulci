@@ -10,6 +10,16 @@ use serde::Deserialize;
 pub struct Config {
     pub hooks: HooksConfig,
     pub tools: ToolsConfig,
+    pub watch: WatchConfig,
+}
+
+/// Controls which paths the daemon watches and scans.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct WatchConfig {
+    /// Relative paths (from project root) to skip entirely — initial scan and file events.
+    /// Useful for fixture or vendor directories that contain intentional violations.
+    pub exclude: Vec<String>,
 }
 
 /// Controls which quality-gate adapters are active.
@@ -149,6 +159,22 @@ mod tests {
         assert!(cfg.tools.ruff.is_none());
         assert!(cfg.tools.ty.is_none());
         assert!(cfg.tools.pytest.is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn watch_exclude_parsed() {
+        let dir = write_toml("[watch]\nexclude = [\"benchmarks/fixture\", \"vendor\"]\n");
+        let cfg = load_config(&dir).unwrap();
+        assert_eq!(cfg.watch.exclude, vec!["benchmarks/fixture", "vendor"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn watch_exclude_defaults_empty() {
+        let dir = write_toml("");
+        let cfg = load_config(&dir).unwrap();
+        assert!(cfg.watch.exclude.is_empty());
         std::fs::remove_dir_all(&dir).ok();
     }
 }
