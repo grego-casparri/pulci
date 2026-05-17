@@ -1,17 +1,22 @@
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 
 use serde::Deserialize;
 
-use super::{run_with_timeout, Diagnostic, Hook, Severity, DEFAULT_HOOK_TIMEOUT};
+use super::{run_with_timeout, Diagnostic, Hook, Severity};
 
 pub struct RuffAdapter {
     invocation: Vec<String>,
+    timeout: Duration,
 }
 
 impl RuffAdapter {
-    pub fn new(resolved: &crate::resolver::ResolvedTool) -> Self {
-        Self { invocation: resolved.invocation.clone() }
+    pub fn new(resolved: &crate::resolver::ResolvedTool, timeout: Duration) -> Self {
+        Self {
+            invocation: resolved.invocation.clone(),
+            timeout,
+        }
     }
 }
 
@@ -43,7 +48,7 @@ impl Hook for RuffAdapter {
         cmd.args(prefix_args)
             .args(["check", "--output-format=json"])
             .args(files);
-        let output = run_with_timeout(cmd, DEFAULT_HOOK_TIMEOUT, "ruff")?;
+        let output = run_with_timeout(cmd, self.timeout, "ruff")?;
 
         // code() is None when the process was killed by a signal — treat as error.
         // ruff exit 0 = clean, exit 1 = violations found, exit > 1 = internal error.

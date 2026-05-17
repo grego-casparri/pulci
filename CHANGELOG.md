@@ -6,6 +6,14 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `[hooks] timeout_secs` in `pulci.toml`: per-hook subprocess wall-clock
+  timeout, applied uniformly to every enabled hook. Defaults to 120 s when
+  omitted. Useful when a project's pytest suite or cold `cargo clippy`
+  legitimately exceeds the default. Previously the timeout was a hardcoded
+  constant; pinning a longer value avoids spurious `tool_errors` entries
+  for slow-but-correct hooks.
+
 ### Fixed
 - Hook subprocesses (ruff, ty, pytest, clippy) no longer outlive the daemon as
   orphans when an external process terminates `pulci start`. Cross-platform:

@@ -1,18 +1,23 @@
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 
 use serde::Deserialize;
 
-use super::{run_with_timeout, Diagnostic, Hook, Severity, DEFAULT_HOOK_TIMEOUT};
+use super::{run_with_timeout, Diagnostic, Hook, Severity};
 use crate::resolver::ResolvedTool;
 
 pub struct CargoAdapter {
     invocation: Vec<String>,
+    timeout: Duration,
 }
 
 impl CargoAdapter {
-    pub fn new(resolved: &ResolvedTool) -> Self {
-        Self { invocation: resolved.invocation.clone() }
+    pub fn new(resolved: &ResolvedTool, timeout: Duration) -> Self {
+        Self {
+            invocation: resolved.invocation.clone(),
+            timeout,
+        }
     }
 }
 
@@ -61,7 +66,7 @@ impl Hook for CargoAdapter {
             "-D",
             "warnings",
         ]);
-        let output = run_with_timeout(cmd, DEFAULT_HOOK_TIMEOUT, "clippy")?;
+        let output = run_with_timeout(cmd, self.timeout, "clippy")?;
         // clippy exits non-zero when warnings/errors are found (-D warnings), so we parse
         // stdout regardless of exit status. A None code (signal kill) is a real failure.
         if output.status.code().is_none() {

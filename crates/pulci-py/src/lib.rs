@@ -216,29 +216,37 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
     let mut hook_list: Vec<Arc<dyn Hook>> = Vec::new();
     let mut tool_infos: Vec<pulci_core::state::ToolInfo> = Vec::new();
 
+    // Resolve the hook subprocess timeout from config (falls back to
+    // DEFAULT_HOOK_TIMEOUT). One value applies to every enabled hook.
+    let hook_timeout: Duration = config
+        .hooks
+        .timeout_secs
+        .map(Duration::from_secs)
+        .unwrap_or(pulci_core::hooks::DEFAULT_HOOK_TIMEOUT);
+
     if config.hooks.ruff {
         let r = pulci_core::resolver::resolve_tool("ruff", &project_root, config.tools.ruff.as_deref())
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         tool_infos.push(resolved_to_info(&r));
-        hook_list.push(Arc::new(RuffAdapter::new(&r)));
+        hook_list.push(Arc::new(RuffAdapter::new(&r, hook_timeout)));
     }
     if config.hooks.ty {
         let r = pulci_core::resolver::resolve_tool("ty", &project_root, config.tools.ty.as_deref())
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         tool_infos.push(resolved_to_info(&r));
-        hook_list.push(Arc::new(TyAdapter::new(&r)));
+        hook_list.push(Arc::new(TyAdapter::new(&r, hook_timeout)));
     }
     if config.hooks.pytest {
         let r = pulci_core::resolver::resolve_tool("pytest", &project_root, config.tools.pytest.as_deref())
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         tool_infos.push(resolved_to_info(&r));
-        hook_list.push(Arc::new(PytestAdapter::new(&r, project_root.clone())));
+        hook_list.push(Arc::new(PytestAdapter::new(&r, project_root.clone(), hook_timeout)));
     }
     if config.hooks.clippy {
         let r = pulci_core::resolver::resolve_tool("cargo", &project_root, None)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         tool_infos.push(resolved_to_info(&r));
-        hook_list.push(Arc::new(CargoAdapter::new(&r)));
+        hook_list.push(Arc::new(CargoAdapter::new(&r, hook_timeout)));
     }
 
     // Determine stale: tools changed since last daemon run?

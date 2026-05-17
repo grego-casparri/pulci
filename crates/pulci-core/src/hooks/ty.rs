@@ -1,15 +1,20 @@
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 
-use super::{run_with_timeout, Diagnostic, Hook, Severity, DEFAULT_HOOK_TIMEOUT};
+use super::{run_with_timeout, Diagnostic, Hook, Severity};
 
 pub struct TyAdapter {
     invocation: Vec<String>,
+    timeout: Duration,
 }
 
 impl TyAdapter {
-    pub fn new(resolved: &crate::resolver::ResolvedTool) -> Self {
-        Self { invocation: resolved.invocation.clone() }
+    pub fn new(resolved: &crate::resolver::ResolvedTool, timeout: Duration) -> Self {
+        Self {
+            invocation: resolved.invocation.clone(),
+            timeout,
+        }
     }
 }
 
@@ -24,7 +29,7 @@ impl Hook for TyAdapter {
             .ok_or_else(|| anyhow::anyhow!("ty invocation vector is empty"))?;
         let mut cmd = Command::new(bin);
         cmd.args(prefix_args).arg("check").args(files);
-        let output = run_with_timeout(cmd, DEFAULT_HOOK_TIMEOUT, "ty")?;
+        let output = run_with_timeout(cmd, self.timeout, "ty")?;
 
         // ty exit 0 = clean, exit 1 = type errors found, exit > 1 = internal error.
         // code() is None when killed by signal — treat as error in both cases.

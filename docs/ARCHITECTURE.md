@@ -163,10 +163,12 @@ typical "save + auto-format" double-write of modern editors without
 introducing perceptible latency on a single edit. Hardcoded.
 
 **Hook timeout.** Each hook subprocess is killed and reported as a
-`tool_errors` entry if it does not exit within `DEFAULT_HOOK_TIMEOUT`
-(120 s). Generous enough that legitimate slow runs (cold pytest, first-run
-cargo clippy) never trip it; tight enough that a true hang surfaces within
-two minutes instead of freezing the daemon indefinitely.
+`tool_errors` entry if it does not exit within the configured timeout.
+Default is 120 s — generous enough that legitimate slow runs (cold pytest,
+first-run cargo clippy) never trip it; tight enough that a true hang
+surfaces within two minutes instead of freezing the daemon indefinitely.
+Override via `[hooks] timeout_secs = N` in `pulci.toml` when a real test
+suite exceeds the default.
 
 **Exit codes (public contract).**
 

@@ -30,6 +30,11 @@
           "type": "boolean",
           "default": false,
           "description": "Run cargo clippy on the workspace (intended for Rust projects using pulci on itself)."
+        },
+        "timeout_secs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-hook subprocess wall-clock timeout in seconds. Applies uniformly to every enabled hook. Omit (or null) to use the default of 120. Useful for projects whose pytest suite or cold cargo clippy legitimately exceeds 120s."
         }
       }
     },

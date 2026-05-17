@@ -34,6 +34,10 @@ pub struct HooksConfig {
     pub pytest: bool,
     /// Run `cargo clippy --workspace` on any Rust file change. Default: false.
     pub clippy: bool,
+    /// Per-hook subprocess wall-clock timeout in seconds. Applies uniformly to
+    /// every enabled hook. `None` falls back to `DEFAULT_HOOK_TIMEOUT` (120 s).
+    /// Useful when a real test suite legitimately runs longer than the default.
+    pub timeout_secs: Option<u64>,
 }
 
 impl Default for HooksConfig {
@@ -43,6 +47,7 @@ impl Default for HooksConfig {
             ty: true,
             pytest: false,
             clippy: false,
+            timeout_secs: None,
         }
     }
 }
@@ -175,6 +180,22 @@ mod tests {
         let dir = write_toml("");
         let cfg = load_config(&dir).unwrap();
         assert!(cfg.watch.exclude.is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn timeout_secs_defaults_to_none() {
+        let dir = write_toml("");
+        let cfg = load_config(&dir).unwrap();
+        assert!(cfg.hooks.timeout_secs.is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn timeout_secs_parsed_when_present() {
+        let dir = write_toml("[hooks]\ntimeout_secs = 300\n");
+        let cfg = load_config(&dir).unwrap();
+        assert_eq!(cfg.hooks.timeout_secs, Some(300));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

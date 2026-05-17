@@ -1,16 +1,26 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
-use super::{run_with_timeout, Diagnostic, Hook, Severity, DEFAULT_HOOK_TIMEOUT};
+use super::{run_with_timeout, Diagnostic, Hook, Severity};
 
 pub struct PytestAdapter {
     invocation: Vec<String>,
     project_root: PathBuf,
+    timeout: Duration,
 }
 
 impl PytestAdapter {
-    pub fn new(resolved: &crate::resolver::ResolvedTool, project_root: PathBuf) -> Self {
-        Self { invocation: resolved.invocation.clone(), project_root }
+    pub fn new(
+        resolved: &crate::resolver::ResolvedTool,
+        project_root: PathBuf,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            invocation: resolved.invocation.clone(),
+            project_root,
+            timeout,
+        }
     }
 }
 
@@ -40,7 +50,7 @@ impl Hook for PytestAdapter {
             .args(["--tb=no", "-q", "--no-header"])
             .current_dir(&self.project_root)
             .args(&test_files);
-        let output = run_with_timeout(cmd, DEFAULT_HOOK_TIMEOUT, "pytest")?;
+        let output = run_with_timeout(cmd, self.timeout, "pytest")?;
 
         // pytest exit 0 = all passed, exit 1 = failures found.
         // code() is None when killed by signal — bail rather than silently return empty.
