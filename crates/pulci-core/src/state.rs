@@ -11,6 +11,7 @@ use crate::orchestrator::RunResult;
 pub const SCHEMA_VERSION: u32 = 1;
 
 static STATE_VERSION: AtomicU64 = AtomicU64::new(0);
+static CHECK_PASS_COUNT: AtomicU64 = AtomicU64::new(0);
 
 /// Return the next monotonic state version. Each call increments the counter.
 pub fn next_state_version() -> u64 {
@@ -29,6 +30,24 @@ pub fn next_state_version() -> u64 {
 /// reset counter caught up — many checks instead of one.
 pub fn seed_state_version(start: u64) {
     STATE_VERSION.store(start, Ordering::Relaxed);
+}
+
+/// Increment and return the running count of completed check passes. This
+/// is what `summary.checks_run` exposes — a monotonic counter of how many
+/// times the orchestrator has produced a result set since first daemon
+/// run, persisted across restarts via `seed_check_passes`.
+pub fn next_check_pass() -> u64 {
+    // fetch_add returns the OLD value; first call returns 0 then leaves
+    // the counter at 1. We expose `+1` so the first pass reports as
+    // checks_run=1 (1-indexed, what a human expects).
+    CHECK_PASS_COUNT.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+/// Seed the check-pass counter on daemon restart. Mirrors `seed_state_version`:
+/// reads the prior `state.json` and continues counting from there so the
+/// number a consumer sees keeps climbing across restarts.
+pub fn seed_check_passes(start: u64) {
+    CHECK_PASS_COUNT.store(start, Ordering::Relaxed);
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +131,13 @@ pub fn build_state(results: &[RunResult], tools: Vec<ToolInfo>, stale: bool) -> 
         .collect();
     tool_errors.sort_by(|a, b| a.tool.cmp(&b.tool));
 
+    // `checks_run` historically was `results.len()` — the number of hook
+    // adapters active in THIS pass, which on a default config is 2 forever.
+    // The name promised a cumulative counter, and an external agent flagged
+    // the mismatch in 0.0.5. Reinterpreted in 0.0.6 to actually mean "how
+    // many check passes has this daemon produced", monotonic across restarts.
+    let checks_run = next_check_pass();
+
     State {
         schema_version: SCHEMA_VERSION,
         state_version: next_state_version(),
@@ -119,7 +145,7 @@ pub fn build_state(results: &[RunResult], tools: Vec<ToolInfo>, stale: bool) -> 
         summary: Summary {
             errors,
             warnings,
-            checks_run: results.len() as u32,
+            checks_run: checks_run.min(u32::MAX as u64) as u32,
             stale,
         },
         diagnostics: all_diagnostics,
@@ -237,10 +263,13 @@ mod tests {
 
     #[test]
     fn build_counts_correctly() {
+        // checks_run is a global monotonic counter since 0.0.6 — it depends
+        // on the order tests run, so don't assert a specific value. Diagnostic
+        // counts still come from the input and ARE deterministic.
         let state = build_state(&[make_result(2, 1)], vec![], false);
         assert_eq!(state.summary.errors, 2);
         assert_eq!(state.summary.warnings, 1);
-        assert_eq!(state.summary.checks_run, 1);
+        assert!(state.summary.checks_run > 0);
         assert_eq!(state.schema_version, SCHEMA_VERSION);
         assert!(!state.summary.stale);
     }
@@ -249,7 +278,22 @@ mod tests {
     fn build_empty_results() {
         let state = build_state(&[], vec![], false);
         assert_eq!(state.summary.errors, 0);
-        assert_eq!(state.summary.checks_run, 0);
+        // checks_run increments even when zero hooks ran — it reflects
+        // check passes, not hook count.
+        assert!(state.summary.checks_run > 0);
+    }
+
+    #[test]
+    fn checks_run_increases_across_calls() {
+        // Lock the counter so parallel test runs don't race.
+        let _guard = COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        seed_check_passes(100);
+        let a = build_state(&[], vec![], false).summary.checks_run;
+        let b = build_state(&[], vec![], false).summary.checks_run;
+        assert_eq!(a, 101);
+        assert_eq!(b, 102);
     }
 
     #[test]
@@ -405,7 +449,9 @@ mod tests {
         assert_eq!(state.tool_errors.len(), 1);
         assert_eq!(state.tool_errors[0].tool, "pytest");
         assert!(state.tool_errors[0].message.contains("timed out"));
-        assert_eq!(state.summary.checks_run, 2);
+        // checks_run is now a global monotonic counter — assert >0 rather
+        // than == hooks count (the pre-0.0.6 interpretation).
+        assert!(state.summary.checks_run > 0);
     }
 
     #[test]

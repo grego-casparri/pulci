@@ -12,7 +12,7 @@ git clone https://github.com/grego-casparri/pulci
 cd pulci
 uv sync
 uv run maturin develop --release
-uv run pulci --version   # should print 0.0.5
+uv run pulci --version   # should print 0.0.6
 ```
 
 ## Commit hooks (prek)

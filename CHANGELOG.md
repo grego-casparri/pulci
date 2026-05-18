@@ -6,6 +6,70 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-05-18
+
+Two rounds of feedback from the same external agent against 0.0.4 and
+0.0.5. This release responds with: the silent-correctness fix for path
+duplication, surfacing of startup errors through the MCP `not_running`
+response, backward-compat shim for the breaking `pulci mcp` API change
+in 0.0.5, a cumulative `checks_run` counter that finally matches its
+name, and quieter stdout in `--agent` mode. One reported finding (event
+loss under burst) defers to 0.0.7 — root cause not yet diagnosed and a
+half-fix would mask it; Q-17 in pulci-internal documents the
+instrumentation plan.
+
+### Added
+- `.pulci/startup_error.json` — written by `pulci start` when a
+  fail-fast check trips (e.g. `[tools] ruff = "99.99.99"` that doesn't
+  resolve via uvx). Surfaced by `pulci status` and the MCP
+  `pulci_status` tool in the `not_running` response: agents previously
+  retried in a loop seeing only "daemon not running"; now they see
+  `{"status":"not_running","hint":"pulci start failed: …","startup_error":{...}}`
+  with the actionable cause. Cleared automatically when the daemon
+  passes all fail-fast checks.
+
+### Changed
+- `checks_run` in `summary` is now a real monotonic counter — number of
+  check passes completed since the daemon first ran on this project,
+  persisted across restarts via the same mechanism that backs
+  `state_version`. Before 0.0.6 it was `hook_list.len()` (always 2 on
+  default config), which silently misled consumers since the field
+  name promised a counter. Tracked as BUG-3 in 0.0.5 feedback. Schema
+  type unchanged; semantic clarified in docs and the test suite.
+- `pulci start --agent` now silences the per-diagnostic stream
+  completely — initial sweep AND per-edit. Before 0.0.6 a fresh sweep
+  on a project with 2400+ diagnostics dumped ~370KB to stdout, filling
+  pipe buffers of agents that launched pulci as a subprocess. The
+  footer (`N errors, M warnings (K files checked, T.Ts)`) is preserved
+  in both modes as a lifecycle signal. Human mode (default) keeps
+  streaming during the event loop so an interactive user sees their
+  edits' diagnostics appear; the initial-sweep skip from 0.0.5 stays.
+
+### Fixed
+- Event paths from the watcher are canonicalised at intake, so a single
+  file no longer appears twice in `diagnostics[]` (once relative, once
+  absolute) when notify reports mixed forms during a burst.
+  Reported as CONCUR-2 in 0.0.5 feedback. Files that fail to
+  canonicalise (deleted between event and intake) are dropped at the
+  intake stage rather than producing ghost diagnostics.
+
+### Backwards-compatibility shim
+- Legacy `pulci mcp <PATH>` (the positional form that 0.0.5 broke when
+  promoting `path` to `--path`) is silently rewritten to the new flag
+  form at argv level, with a one-line deprecation warning on stderr.
+  This unblocks MCP host configs that still have
+  `args: ["mcp", "/some/path"]` from 0.0.4 days. Shim will be removed
+  in 0.1.0; users should update to `args: ["mcp", "--path", "/some/path"]`
+  (or just `args: ["mcp"]` if no custom path).
+
+### Deferred
+- Event loss under simultaneous-burst editing (CONCUR-1 in 0.0.5
+  feedback). The root cause is not yet diagnosed with certainty —
+  candidates include mtime resolution on some filesystems, notify
+  event coalescing, and debounce-window splits. A half-fix would
+  mask the bug; 0.0.7 carries the instrumentation work needed to
+  pin it down. Tracked as Q-17 in `pulci-internal`.
+
 ## [0.0.5] - 2026-05-17
 
 Driven by the first detailed external-agent feedback on 0.0.4. One

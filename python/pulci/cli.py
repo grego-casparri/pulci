@@ -132,6 +132,8 @@ def status(
     state_file = pathlib.Path(path) / ".pulci" / "state.json"
 
     if not state_file.exists():
+        from pulci._heartbeat import read_startup_error as _read_startup_error
+
         hb = _heartbeat_info(state_file.parent)
         if hb["daemon_status"] == "alive":
             payload = {
@@ -144,10 +146,27 @@ def status(
             else:
                 typer.echo("Daemon is running. Touch any .py file to trigger the first check.")
         else:
+            # Enrich with startup_error.json so a config/pin failure is
+            # surfaced to the user instead of generic "run pulci start" —
+            # they probably DID run it and it bailed before writing state.
+            startup_err = _read_startup_error(state_file.parent)
+            hint = "run `pulci start` first"
+            if startup_err:
+                hint = (
+                    f"pulci start failed: {startup_err.get('message', 'unknown error')}. "
+                    f"Fix the issue and re-run `pulci start`."
+                )
             if json_output:
-                typer.echo(json.dumps({"status": "not_running", "hint": "run `pulci start` first"}))
+                response: dict = {"status": "not_running", "hint": hint}
+                if startup_err:
+                    response["startup_error"] = startup_err
+                typer.echo(json.dumps(response))
             else:
-                typer.echo("No state available. Run `pulci start` first.", err=True)
+                if startup_err:
+                    typer.echo(f"pulci start failed: {startup_err.get('message')}", err=True)
+                    typer.echo("  Fix the issue and re-run `pulci start`.", err=True)
+                else:
+                    typer.echo("No state available. Run `pulci start` first.", err=True)
         raise typer.Exit(code=0)
 
     raw = state_file.read_text()
@@ -349,5 +368,44 @@ def mcp_install(
     typer.echo(f"Restart {host} (or reload the MCP server list) to pick up the change.")
 
 
-if __name__ == "__main__":
+_KNOWN_MCP_SUBCOMMANDS = frozenset({"info", "install"})
+
+
+def _rewrite_legacy_mcp_args() -> None:
+    """Backward compat shim: `pulci mcp <PATH>` → `pulci mcp --path <PATH>`.
+
+    The 0.0.5 fix for `pulci mcp info` crashing on startup moved the
+    project-root argument from a positional to a `--path` flag (without it,
+    typer ate `info` and `install` as positional values and crashed before
+    dispatching the subcommand). The change broke any caller that already
+    passed a positional path — including MCP hosts whose configs had
+    `args: ["mcp", "/some/project"]`. Detect that pattern and rewrite to the
+    new form with a one-line deprecation warning, so existing integrations
+    keep working through the 0.0.x line. Remove this shim in 0.1.0.
+    """
+    import sys
+
+    if len(sys.argv) >= 3 and sys.argv[1] == "mcp":
+        third = sys.argv[2]
+        # Only rewrite if it doesn't look like a flag AND isn't a subcommand
+        # we already know. New invocations using `--path` or subcommands are
+        # passed through untouched.
+        if not third.startswith("-") and third not in _KNOWN_MCP_SUBCOMMANDS:
+            sys.stderr.write(
+                f"pulci: warning: `pulci mcp {third}` is deprecated; "
+                f"use `pulci mcp --path {third}`. This compatibility shim "
+                f"will be removed in 0.1.0.\n"
+            )
+            sys.argv[2:3] = ["--path", third]
+
+
+def main() -> None:
+    """
+    Entry point. Runs the legacy-args shim before handing off to typer.
+    """
+    _rewrite_legacy_mcp_args()
     app()
+
+
+if __name__ == "__main__":
+    main()

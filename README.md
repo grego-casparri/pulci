@@ -7,7 +7,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 
-**v0.0.5** — Apache-2.0 — [docs/AGENTS.md](docs/AGENTS.md)
+**v0.0.6** — Apache-2.0 — [docs/AGENTS.md](docs/AGENTS.md)
 
 ## Why
 

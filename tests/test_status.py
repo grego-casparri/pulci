@@ -220,3 +220,47 @@ def test_status_no_tool_errors_field_does_not_print_section() -> None:
         write_state(pathlib.Path(tmp), MINIMAL_STATE)
         result = runner.invoke(app, ["status"])
     assert "Tool errors" not in result.output
+
+
+def test_status_surfaces_startup_error_when_daemon_failed_to_start() -> None:
+    # When the daemon bails fast (e.g. bad [tools] pin) it writes
+    # `.pulci/startup_error.json`. `pulci status` should surface that cause
+    # instead of generic "run pulci start" — the user already ran it and
+    # it bailed. Regression for STARTUP-2 in the 0.0.5 feedback round.
+    with runner.isolated_filesystem() as tmp:
+        pulci_dir = pathlib.Path(tmp) / ".pulci"
+        pulci_dir.mkdir()
+        (pulci_dir / "startup_error.json").write_text(
+            json.dumps(
+                {
+                    "error_type": "tool_resolution_failed",
+                    "message": "`ruff` pinned to 99.99.99 — version not on PyPI",
+                    "timestamp": "2026-05-18T00:00:00Z",
+                }
+            )
+        )
+        result = runner.invoke(app, ["status"])
+    assert result.exit_code == 0
+    assert "pulci start failed" in result.output
+    assert "99.99.99" in result.output
+
+
+def test_status_json_includes_startup_error_field() -> None:
+    with runner.isolated_filesystem() as tmp:
+        pulci_dir = pathlib.Path(tmp) / ".pulci"
+        pulci_dir.mkdir()
+        (pulci_dir / "startup_error.json").write_text(
+            json.dumps(
+                {
+                    "error_type": "tool_resolution_failed",
+                    "message": "bad pin",
+                    "timestamp": "2026-05-18T00:00:00Z",
+                }
+            )
+        )
+        result = runner.invoke(app, ["status", "--json"])
+    parsed = json.loads(result.output)
+    assert parsed["status"] == "not_running"
+    assert "startup_error" in parsed
+    assert parsed["startup_error"]["error_type"] == "tool_resolution_failed"
+    assert "pulci start failed" in parsed["hint"]

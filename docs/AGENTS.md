@@ -4,7 +4,7 @@ This document is for AI coding agents (Claude Code, Cursor, Codex,
 custom harnesses). If you're a human, the [README](../README.md)
 is what you want.
 
-> This document describes the pulci contract as of **v0.0.5** (schema_version 1).
+> This document describes the pulci contract as of **v0.0.6** (schema_version 1).
 
 ## MCP setup (recommended)
 

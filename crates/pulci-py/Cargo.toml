@@ -16,6 +16,7 @@ crate-type = ["cdylib"]
 pulci-core = { path = "../pulci-core" }
 pyo3 = { version = "0.22" }
 fs2.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 
 [target.'cfg(unix)'.dependencies]

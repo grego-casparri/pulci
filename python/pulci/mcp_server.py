@@ -25,8 +25,34 @@ from pulci._heartbeat import (
     heartbeat_info as _heartbeat_info,
 )
 from pulci._heartbeat import (
+    read_startup_error as _read_startup_error,
+)
+from pulci._heartbeat import (
     read_state_json as _read_state,
 )
+
+
+def _not_running_response(path: str, state_dir: pathlib.Path) -> dict:
+    """
+    Build a `{"status": "not_running"}` response, enriched with the
+    startup-error file when the daemon failed to start. Without the
+    enrichment, an agent watching pulci_status sees "not_running" both
+    when no daemon was launched AND when one was launched but bailed on a
+    bad pulci.toml — and retries blindly in the second case.
+    """
+    base: dict = {
+        "status": "not_running",
+        "hint": f"run `pulci start {path}` in your terminal to start the daemon",
+    }
+    err = _read_startup_error(state_dir)
+    if err:
+        base["startup_error"] = err
+        base["hint"] = (
+            f"pulci start failed: {err.get('message', 'unknown error')}. "
+            f"Fix the issue and re-run `pulci start {path}`."
+        )
+    return base
+
 
 mcp = FastMCP(
     "pulci",
@@ -72,11 +98,6 @@ async def pulci_status(
     state_file = pathlib.Path(path).resolve() / ".pulci" / "state.json"
     state_dir = state_file.parent
 
-    _not_running = {
-        "status": "not_running",
-        "hint": f"run `pulci start {path}` in your terminal to start the daemon",
-    }
-
     if not state_file.exists():
         # Parity with `pulci status`: distinguish "no daemon at all" from
         # "daemon just started, initial scan still running". Without this the
@@ -88,7 +109,7 @@ async def pulci_status(
                 "daemon_status": "alive",
                 "hint": "daemon is running — initial scan in progress or no file changes yet",
             }
-        return _not_running
+        return _not_running_response(path, state_dir)
 
     # Fast path — no blocking requested.
     if since_version is None:
@@ -96,14 +117,14 @@ async def pulci_status(
 
     # If daemon is confirmed dead, no point waiting for a version that will never arrive.
     if _daemon_dead(state_dir):
-        return _not_running
+        return _not_running_response(path, state_dir)
 
     # Blocking path — wait until state_version > since_version.
     deadline = time.monotonic() + timeout_ms / 1000.0
 
     while True:
         if not state_file.exists() or _daemon_dead(state_dir):
-            return _not_running
+            return _not_running_response(path, state_dir)
         state = _read_state(state_file)
         current_version = state.get("state_version", 0)
         if current_version > since_version:

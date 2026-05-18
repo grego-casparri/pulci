@@ -88,6 +88,36 @@ fn setup_kill_on_close_job() {
     }
 }
 
+/// Persist a structured description of a startup-time failure so the MCP
+/// server and `pulci status` can surface the cause instead of generic
+/// "daemon not running". Best-effort: failures to write the file are
+/// swallowed because they would mask the underlying error we are trying
+/// to surface (typically a config or tool-resolution issue).
+fn write_startup_error(pulci_dir: &Path, error_type: &str, message: &str) {
+    if std::fs::create_dir_all(pulci_dir).is_err() {
+        return;
+    }
+    let json = format!(
+        "{{\n  \"error_type\": {},\n  \"message\": {},\n  \"timestamp\": {}\n}}\n",
+        serde_json::Value::String(error_type.to_string()),
+        serde_json::Value::String(message.to_string()),
+        serde_json::Value::String(pulci_core::state::now_iso8601()),
+    );
+    let path = pulci_dir.join("startup_error.json");
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, json).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
+/// Clear any prior startup_error file once the daemon has progressed past
+/// all fail-fast checks. Without this, a stale error from a previous run
+/// would persist and mislead the MCP `not_running` response after the user
+/// fixes the underlying issue and re-runs `pulci start`.
+fn clear_startup_error(pulci_dir: &Path) {
+    let _ = std::fs::remove_file(pulci_dir.join("startup_error.json"));
+}
+
 fn write_heartbeat(path: &Path) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -220,7 +250,16 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         hook_timeout,
         |name, pinned| pulci_core::resolver::resolve_tool(name, &project_root, pinned),
     )
-    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    .map_err(|e| {
+        // Persist the cause to `.pulci/startup_error.json` so the MCP server's
+        // `pulci_status` call can surface "tool resolution failed" to the
+        // agent instead of generic "daemon not running". Without this an
+        // agent that ran `pulci start` (which fails fast on bad pins) and
+        // then queried the MCP would see `{"status":"not_running"}` with
+        // no clue why — and retry indefinitely.
+        write_startup_error(&pulci_dir, "tool_resolution_failed", &e.to_string());
+        pyo3::exceptions::PyRuntimeError::new_err(e.to_string())
+    })?;
 
     // Foreign-venv warning. When `$PATH` carries a leaked activation from
     // another project, the resolver picks that project's binary instead of
@@ -253,6 +292,12 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         .ok();
     if let Some(prev) = &prev_state {
         pulci_core::state::seed_state_version(prev.state_version + 1);
+        // Continue the checks_run counter where the previous daemon run
+        // left off. Without this the counter resets to 0 every restart,
+        // recreating the same "stuck-at-N" confusion an external agent
+        // flagged on 0.0.5 (where N was the hook count, but the visual
+        // effect is the same — looks like nothing's progressing).
+        pulci_core::state::seed_check_passes(prev.summary.checks_run as u64);
     }
     let mut stale = prev_state
         .as_ref()
@@ -321,6 +366,12 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
     const MAX_CONSECUTIVE_WRITE_ERRORS: u32 = 3;
     let mut consecutive_write_errors: u32 = 0;
 
+    // Every fail-fast point above this line writes startup_error.json; we
+    // reached this point so all of them passed. Wipe any stale error file
+    // from a previous failed run so the MCP server's `not_running` path
+    // doesn't surface obsolete state.
+    clear_startup_error(&pulci_dir);
+
     // Initial full-project scan so state.json exists before the first file event.
     {
         let all_py = collect_py_files(&project_root_for_scan, &project_root_for_scan, &config.watch.exclude);
@@ -334,27 +385,14 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
             });
             let _ = results;
             stale = false;
-            // Human mode: skip the per-diagnostic stream during the initial
-            // sweep. On large projects this is 2000+ lines / hundreds of KB
-            // of text no human is going to read; state.json has the same data
-            // queryable. Agent mode keeps streaming because agents want the
-            // raw diagnostics on stdout.
-            if agent {
-                for d in &state.diagnostics {
-                    let code_part = d.code.as_deref()
-                        .map(|c| format!("[{}/{}]", d.tool, c))
-                        .unwrap_or_else(|| format!("[{}]", d.tool));
-                    println!(
-                        "{}:{}:{}: {} {} {}",
-                        d.file.display(), d.line, d.col, d.severity, code_part, d.message
-                    );
-                }
-            }
+            // Initial sweep on a real project produces 2000+ diagnostics —
+            // streaming them line-by-line floods stdout (~370 KB) and fills
+            // host pipe buffers for agents that launched pulci as a
+            // subprocess. The canonical surface is state.json, queried by
+            // `pulci status` or the MCP tool; the stream is auxiliary and
+            // not useful when the volume is this high. Suppress in both
+            // modes; the footer (printed below) is enough lifecycle signal.
             let elapsed = t0.elapsed().as_secs_f64();
-            // Footer wording is unchanged across agent/human so tests and
-            // existing tools can parse both. The human-vs-agent ergonomic
-            // difference is in the per-diagnostic stream above — agent mode
-            // emits, human mode stays quiet and lets the user query state.json.
             println!(
                 "{} errors, {} warnings ({} files checked, {:.1}s)",
                 state.summary.errors,
@@ -392,9 +430,28 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
             Ok(first) => {
                 let mut paths: HashSet<PathBuf> = HashSet::new();
                 let mut needs_rescan = false;
+                // Canonicalize every event path at intake. notify does NOT
+                // guarantee absolute vs relative consistency across backends
+                // or even within a single inotify burst — without this an
+                // external agent saw the same file appear twice in
+                // `diagnostics[]` once as `/abs/a.py` and once as `a.py`
+                // (CONCUR-2 in the 0.0.5 feedback round). Files that fail
+                // to canonicalize (deleted between event and intake) are
+                // dropped, which is the correct behaviour: a deleted file
+                // can't be checked. Falls back to the original path on
+                // canonicalize errors that aren't ENOENT.
+                let intake = |p: PathBuf, set: &mut HashSet<PathBuf>| {
+                    match p.canonicalize() {
+                        Ok(canonical) => { set.insert(canonical); }
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                            // File deleted between event and intake; skip.
+                        }
+                        Err(_) => { set.insert(p); }
+                    }
+                };
                 match first {
                     FileEvent::Rescan => { needs_rescan = true; }
-                    FileEvent::Changed { path, .. } => { paths.insert(path); }
+                    FileEvent::Changed { path, .. } => { intake(path, &mut paths); }
                 }
                 let deadline = Instant::now() + Duration::from_millis(50);
                 loop {
@@ -404,7 +461,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                     }
                     match rx.recv_timeout(remaining) {
                         Ok(FileEvent::Rescan) => { needs_rescan = true; }
-                        Ok(FileEvent::Changed { path, .. }) => { paths.insert(path); }
+                        Ok(FileEvent::Changed { path, .. }) => { intake(path, &mut paths); }
                         Err(_) => break,
                     }
                 }
@@ -440,16 +497,23 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                 stale = false; // only first run after tool change is stale
                 py.check_signals()?;
 
-                // Compiler-style output per FORMATS.md grammar:
-                // <file>:<line>:<col>: <severity>[<scope>/<code>] <message>
-                for d in &state.diagnostics {
-                    let code_part = d.code.as_deref()
-                        .map(|c| format!("[{}/{}]", d.tool, c))
-                        .unwrap_or_else(|| format!("[{}]", d.tool));
-                    println!(
-                        "{}:{}:{}: {} {} {}",
-                        d.file.display(), d.line, d.col, d.severity, code_part, d.message
-                    );
+                // Per-diagnostic stream is for the interactive human watching
+                // the daemon iterate. In agent mode the consumer reads
+                // state.json (or the MCP tool) and does not want a flood on
+                // stdout — large batches of changed files (e.g. a code-mod
+                // across many sources) would otherwise dump thousands of
+                // lines. Footer below carries the lifecycle signal in both
+                // modes.
+                if !agent {
+                    for d in &state.diagnostics {
+                        let code_part = d.code.as_deref()
+                            .map(|c| format!("[{}/{}]", d.tool, c))
+                            .unwrap_or_else(|| format!("[{}]", d.tool));
+                        println!(
+                            "{}:{}:{}: {} {} {}",
+                            d.file.display(), d.line, d.col, d.severity, code_part, d.message
+                        );
+                    }
                 }
                 let elapsed = t0.elapsed().as_secs_f64();
                 println!(

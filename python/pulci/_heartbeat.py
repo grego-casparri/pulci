@@ -119,3 +119,26 @@ def read_state_json(state_file: pathlib.Path) -> dict:
             "status": "error",
             "hint": "state.json is corrupted — stop and restart `pulci start`",
         }
+
+
+def read_startup_error(state_dir: pathlib.Path) -> dict | None:
+    """
+    Read `.pulci/startup_error.json` if present.
+
+    Daemon writes this file when it fails fast (typically a `[tools]` pin
+    that doesn't resolve, but any startup failure that gets past
+    `.pulci/` creation lands here). Consumers showing "not_running" can
+    enrich the response with the actual cause so an agent doesn't loop
+    blindly. Missing or malformed file → None.
+    """
+    err_file = state_dir / "startup_error.json"
+    if not err_file.exists():
+        return None
+    try:
+        data = json.loads(err_file.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"pulci: warning: startup_error.json unreadable: {exc}", file=sys.stderr)
+        return None
+    if not isinstance(data, dict) or "message" not in data:
+        return None
+    return data
