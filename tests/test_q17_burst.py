@@ -1,13 +1,15 @@
 """
-Repro determinista para Q-17 (event loss bajo ráfaga).
+Regression guard para Q-17 (event loss bajo ráfaga).
 
-Escribe N archivos .py en burst, espera settling, valida que los N aparecen
-en state.json. Si falla: parsea events.log y reporta dónde se perdió cada
-archivo cross-stage (watcher → debounce → cache → state_write).
+Escribe 8 archivos .py en burst, espera settling, valida que los 8 aparecen
+en state.json. En pipeline sano debe pasar; cuando Q-17 dispara, falla y
+parsea events.log para reportar dónde se perdió cada archivo cross-stage
+(watcher → debounce → cache → state_write).
 
-Marcado `xfail` hasta que el fix de Q-17 aterrice; en ese momento vira a
-passing y queda como regression guard. `strict=False` para que un xpass
-(bug no reproducido en este hardware/run) no rompa CI.
+Q-17 es muy raro en WSL2/ext4 (~4% medido en diagnóstico). Este test no usa
+xfail: pasar significa pipeline limpio, fallar significa Q-17 dispara *con
+events.log diagnóstico capturado en el panic*. Ver
+docs/plans/2026-05-18-q17-findings.md para metodología completa.
 """
 
 from __future__ import annotations
@@ -74,10 +76,6 @@ def _diagnose_missing(missing: set[str], events_log: pathlib.Path) -> str:
     return "\n".join(lines)
 
 
-@pytest.mark.xfail(
-    reason="Q-17: se espera fix antes de virar a passing; strict=False permite xpass",
-    strict=False,
-)
 def test_burst_of_8_files_all_reflected_in_state(tmp_path: pathlib.Path) -> None:
     (tmp_path / "pulci.toml").write_text(
         "[hooks]\nruff = true\nty = false\n\n[debug]\nevent_trace = true\n"
