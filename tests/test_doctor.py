@@ -268,3 +268,43 @@ def test_known_hooks_keys_covers_all_documented_fields() -> None:
         "pytest_test_patterns",
     }
     assert _KNOWN_KEYS_BY_SECTION["hooks"] == expected
+
+
+# --- Debug / event_trace section ------------------------------------------
+
+
+def test_doctor_reports_event_trace_disabled_by_default(tmp_path):
+    (tmp_path / "pulci.toml").write_text("[hooks]\nruff = true\n")
+    from pulci.doctor import diagnose
+
+    report = diagnose(tmp_path)
+    debug_checks = [c for c in report.checks if c.section == "Debug"]
+    assert len(debug_checks) == 1
+    assert debug_checks[0].status == "pass"
+    assert "disabled" in debug_checks[0].message
+
+
+def test_doctor_reports_event_trace_enabled_with_log_size(tmp_path):
+    (tmp_path / "pulci.toml").write_text("[hooks]\nruff = true\n[debug]\nevent_trace = true\n")
+    (tmp_path / ".pulci").mkdir()
+    (tmp_path / ".pulci" / "events.log").write_text(
+        '{"stage":"watcher","ts_ns":1}\n'
+        '{"stage":"watcher","ts_ns":2}\n'
+        '{"stage":"watcher","ts_ns":3}\n'
+    )
+    from pulci.doctor import diagnose
+
+    report = diagnose(tmp_path)
+    debug_checks = [c for c in report.checks if c.section == "Debug"]
+    assert len(debug_checks) == 1
+    assert "3 events" in debug_checks[0].message
+
+
+def test_doctor_warns_event_trace_enabled_but_no_log(tmp_path):
+    (tmp_path / "pulci.toml").write_text("[hooks]\nruff = true\n[debug]\nevent_trace = true\n")
+    from pulci.doctor import diagnose
+
+    report = diagnose(tmp_path)
+    debug_checks = [c for c in report.checks if c.section == "Debug"]
+    assert len(debug_checks) == 1
+    assert debug_checks[0].status == "warn"

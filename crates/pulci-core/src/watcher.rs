@@ -79,10 +79,30 @@ pub fn watch(
                 }
                 for path in event.paths {
                     if !is_ignored(&path) {
-                        let fe = FileEvent::Changed {
-                            path,
-                            kind: format!("{:?}", event.kind),
-                        };
+                        let kind = format!("{:?}", event.kind);
+                        if let Some(tracer) = crate::event_trace::tracer() {
+                            let (mtime_ns, size) = std::fs::metadata(&path)
+                                .ok()
+                                .map(|m| {
+                                    let mtime = m.modified().ok().and_then(|t| {
+                                        t.duration_since(std::time::UNIX_EPOCH)
+                                            .ok()
+                                            .map(|d| d.as_nanos())
+                                    });
+                                    (mtime, Some(m.len()))
+                                })
+                                .unwrap_or((None, None));
+                            let sha = crate::event_trace::content_sha256(&path);
+                            tracer.send(crate::event_trace::EventRecord::Watcher {
+                                ts_ns: crate::event_trace::ts_ns_now(),
+                                path: path.clone(),
+                                kind: kind.clone(),
+                                mtime_ns,
+                                size,
+                                content_sha256: sha,
+                            });
+                        }
+                        let fe = FileEvent::Changed { path, kind };
                         if tx.send(fe).is_err() {
                             return Ok(());
                         }
@@ -159,6 +179,54 @@ mod tests {
     #[test]
     fn allows_tests() {
         assert!(!is_ignored(Path::new("tests/test_smoke.py")));
+    }
+
+    /// Q-17 hipótesis 2/3 regression guard. Escribir 8 archivos en burst tight
+    /// debe producir al menos 8 `Changed` events en el watcher. Si este test
+    /// falla con `changed < N`: confirmación parcial de hipótesis 2 (notify
+    /// coalescing). Si falla con `Rescan` observado: hipótesis adicional
+    /// (queue overflow incluso sin handler lento).
+    #[cfg(unix)]
+    #[test]
+    fn burst_writes_produce_at_least_n_changed_events() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let tmp = std::env::temp_dir().join(format!("pulci_burst_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let watch_path = tmp.clone();
+        std::thread::spawn(move || {
+            let _ = watch(WatcherConfig { path: watch_path }, tx, ready_tx);
+        });
+        ready_rx.recv_timeout(Duration::from_secs(5)).expect("ready");
+
+        const N: usize = 8;
+        for i in 0..N {
+            let p = tmp.join(format!("burst_{i}.py"));
+            std::fs::write(&p, b"x = 1").unwrap();
+        }
+
+        let mut changed = 0;
+        let mut saw_rescan = false;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(FileEvent::Changed { .. }) => changed += 1,
+                Ok(FileEvent::Rescan) => saw_rescan = true,
+                Err(_) => break,
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(
+            changed >= N,
+            "expected ≥ {N} Changed events, got {changed} (rescan_seen={saw_rescan}). \
+             changed < N parcialmente confirma Q-17 hipótesis 2 (notify coalescing)."
+        );
     }
 
     /// Verifies that the `notify` crate itself surfaces `Flag::Rescan` when the

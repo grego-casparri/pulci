@@ -166,6 +166,21 @@ pub fn tools_changed(prev: &[ToolInfo], current: &[ToolInfo]) -> bool {
 
 /// Atomically write `state` to `state_file` (write tmp → rename).
 pub fn write_state(state_file: &Path, state: &State) -> anyhow::Result<()> {
+    if let Some(tracer) = crate::event_trace::tracer() {
+        let files_in_snapshot = state
+            .diagnostics
+            .iter()
+            .map(|d| d.file.clone())
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        tracer.send(crate::event_trace::EventRecord::StateWrite {
+            ts_ns: crate::event_trace::ts_ns_now(),
+            state_version: state.state_version,
+            files_in_snapshot,
+            tools_run: state.tools.iter().map(|t| t.name.clone()).collect(),
+            batch_id: None,
+        });
+    }
     if let Some(parent) = state_file.parent() {
         fs::create_dir_all(parent)?;
     }

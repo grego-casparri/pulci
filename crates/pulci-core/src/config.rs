@@ -13,6 +13,17 @@ pub struct Config {
     pub hooks: HooksConfig,
     pub tools: ToolsConfig,
     pub watch: WatchConfig,
+    pub debug: DebugConfig,
+}
+
+/// Opt-in observability: cuando event_trace = true, el daemon emite eventos
+/// del pipeline (watcher, debounce, cache, state write) a .pulci/events.log
+/// como JSONL. Diseñado para diagnosticar bugs raros (Q-17 fue el primero);
+/// no apto para uso permanente sin un soft cap defensivo (ver event_trace.rs).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DebugConfig {
+    pub event_trace: bool,
 }
 
 /// Controls which paths the daemon watches and scans.
@@ -269,6 +280,30 @@ mod tests {
                 "tests/unit/test_{stem}.py".to_string()
             ]
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn debug_event_trace_defaults_to_false() {
+        let dir = write_toml("");
+        let cfg = load_config(&dir).unwrap();
+        assert!(!cfg.debug.event_trace);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn debug_event_trace_parsed_when_present() {
+        let dir = write_toml("[debug]\nevent_trace = true\n");
+        let cfg = load_config(&dir).unwrap();
+        assert!(cfg.debug.event_trace);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn debug_section_rejects_unknown_keys() {
+        let dir = write_toml("[debug]\nfoo_bar = true\n");
+        let result = load_config(&dir);
+        assert!(result.is_err(), "deny_unknown_fields debe rechazar foo_bar");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

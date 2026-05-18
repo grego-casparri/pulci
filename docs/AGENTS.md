@@ -301,3 +301,48 @@ pulci does not run on commit. That's prek/pre-commit territory.
 
 The user's `pulci.toml` defines which hooks are active. You can read it,
 but you should not modify it without the user's explicit instruction.
+
+## Debug event tracing
+
+Activá esta flag solo cuando estés diagnosticando un bug de pipeline (eventos
+perdidos, debounce raro, cache filtering inesperado). En `pulci.toml`:
+
+```toml
+[debug]
+event_trace = true
+```
+
+Reiniciá `pulci start`. Cada evento del pipeline se loguea como JSONL a
+`.pulci/events.log`. Lifecycle: el `events.log` previo se renombra a
+`events.log.1` al arrancar; soft cap de 100 MB con un
+`{stage:"meta",action:"log_truncated"}` final si lo alcanza.
+
+Stages y campos relevantes:
+- `watcher`: cada FileEvent que llega del watcher con `(path, kind, mtime_ns,
+  size, content_sha256)`. Útil para detectar pérdidas en notify.
+- `debounce`: `window_open` / `window_close` con `batch_id` y, en el close,
+  el array `files` del batch. Útil para detectar window splits.
+- `cache`: `decision` (`unseen` | `changed` | `filtered` | `missing`) con
+  `prev_mtime_ns` / `curr_mtime_ns`. El smoking gun de mtime resolution
+  issues es `decision == "filtered"` con `prev_mtime_ns == curr_mtime_ns`.
+- `state_write`: cada vez que se publica `state.json` con su `state_version`,
+  `files_in_snapshot`, y `tools_run`.
+
+Ejemplos de análisis con jq:
+
+```bash
+# Eventos cross-stage de un path específico:
+jq -c 'select(.path == "src/foo.py")' .pulci/events.log
+
+# Smoking gun de mtime resolution (Q-17 hipótesis 1):
+jq -c 'select(.stage == "cache" and .decision == "filtered" and .prev_mtime_ns == .curr_mtime_ns)' .pulci/events.log
+
+# Qué archivos contenía cada batch del debounce:
+jq -c 'select(.stage == "debounce" and .action == "window_close") | {batch_id, files}' .pulci/events.log
+
+# Resumen de eventos por etapa:
+jq -r '.stage' .pulci/events.log | sort | uniq -c
+```
+
+**Apagá la flag** cuando termines — un debug session larga puede generar
+miles de eventos. `pulci doctor` reporta size + event count cuando está activa.

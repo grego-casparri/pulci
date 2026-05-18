@@ -357,6 +357,17 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         .build()
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
+    // event_trace::init spawns its writer task on the tokio runtime, so it
+    // must run inside the runtime context (otherwise spawn_blocking panics
+    // with "no reactor running"). The _guard keeps that context active just
+    // long enough to register the task.
+    {
+        let _guard = rt.enter();
+        if let Err(e) = pulci_core::event_trace::init(&pulci_dir, config.debug.event_trace) {
+            eprintln!("pulci: event_trace init failed (continuing without trace): {e}");
+        }
+    }
+
     let orchestrator = Orchestrator::new(hook_list);
     let mut cache = FileCache::new();
 
@@ -428,6 +439,15 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         }
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(first) => {
+                let batch_id = pulci_core::event_trace::next_batch_id();
+                if let Some(t) = pulci_core::event_trace::tracer() {
+                    t.send(pulci_core::event_trace::EventRecord::Debounce {
+                        ts_ns: pulci_core::event_trace::ts_ns_now(),
+                        action: pulci_core::event_trace::DebounceAction::WindowOpen,
+                        batch_id,
+                        files: None,
+                    });
+                }
                 let mut paths: HashSet<PathBuf> = HashSet::new();
                 let mut needs_rescan = false;
                 // Canonicalize every event path at intake. notify does NOT
@@ -482,6 +502,14 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                         .filter(|p| is_source_file(p, config.hooks.clippy))
                         .collect()
                 };
+                if let Some(t) = pulci_core::event_trace::tracer() {
+                    t.send(pulci_core::event_trace::EventRecord::Debounce {
+                        ts_ns: pulci_core::event_trace::ts_ns_now(),
+                        action: pulci_core::event_trace::DebounceAction::WindowClose,
+                        batch_id,
+                        files: Some(files.clone()),
+                    });
+                }
                 let changed = cache.filter_changed(&files);
                 if changed.is_empty() {
                     continue;
@@ -553,6 +581,9 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
     }
 
     heartbeat_stop.store(true, Ordering::Relaxed);
+    // Close the event-trace writer channel before dropping the runtime;
+    // otherwise rt.drop() blocks forever on the writer's spawn_blocking task.
+    pulci_core::event_trace::shutdown();
     Ok(())
 }
 

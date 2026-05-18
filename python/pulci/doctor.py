@@ -36,7 +36,7 @@ _KNOWN_TOOLS = ("ruff", "ty", "pytest", "cargo")
 # `#[serde(deny_unknown_fields)]` on every struct; this mirror catches the same
 # typos earlier, with a friendlier message, without having to start the daemon.
 # When the Rust side adds a new key, update the matching set here.
-_KNOWN_SECTIONS = {"hooks", "tools", "watch"}
+_KNOWN_SECTIONS = {"hooks", "tools", "watch", "debug"}
 _KNOWN_KEYS_BY_SECTION: dict[str, set[str]] = {
     "hooks": {
         "ruff",
@@ -49,6 +49,7 @@ _KNOWN_KEYS_BY_SECTION: dict[str, set[str]] = {
     },
     "tools": {"ruff", "ty", "pytest"},
     "watch": {"exclude"},
+    "debug": {"event_trace"},
 }
 
 
@@ -474,6 +475,44 @@ def _check_state_json(report: Report, project_root: pathlib.Path) -> None:
     )
 
 
+def _check_event_trace(report: Report, project_root: pathlib.Path, config: dict | None) -> None:
+    """
+    Surface whether opt-in event_trace is on and how big the log got.
+    """
+    section = "Debug"
+    debug_section = (config or {}).get("debug", {})
+    enabled = bool(debug_section.get("event_trace", False))
+    log = project_root / ".pulci" / "events.log"
+    if not enabled:
+        report.add(Check(section, "event_trace", "pass", "disabled (no overhead)"))
+        return
+    if not log.exists():
+        report.add(
+            Check(
+                section,
+                "event_trace",
+                "warn",
+                "enabled in pulci.toml but events.log does not exist — daemon may not have run yet",
+            )
+        )
+        return
+    size_mb = log.stat().st_size / (1024 * 1024)
+    # Count lines without loading the whole file into memory.
+    lines = 0
+    with log.open("rb") as f:
+        for _ in f:
+            lines += 1
+    report.add(
+        Check(
+            section,
+            "event_trace",
+            "pass",
+            f"enabled, .pulci/events.log ({size_mb:.1f} MB, {lines} events)",
+            details={"enabled": True, "size_mb": size_mb, "events": lines},
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Top-level entry
 # ---------------------------------------------------------------------------
@@ -493,6 +532,7 @@ def diagnose(project_root: pathlib.Path) -> Report:
     _check_pulci_dir_writable(report, project_root)
     _check_daemon_status(report, project_root)
     _check_state_json(report, project_root)
+    _check_event_trace(report, project_root, config)
     return report
 
 
