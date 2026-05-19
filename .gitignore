@@ -30,8 +30,8 @@ wheels/
 benchmarks/results.json
 
 # Local-only files (AI agent instructions + planning docs)
-CLAUDE.md
 docs/plans/
+.claude/
 
 # Secrets / environment
 .env
