@@ -394,18 +394,87 @@ def _wait_for_state(
     return False
 
 
+def _git_init(project_dir: pathlib.Path) -> None:
+    """Initialise a minimal git repo so prek (which requires a git context)
+    can run. Commit everything once so prek's --all-files mode sees a clean
+    HEAD. No-op if git is not available — prek will then skip with its own
+    error message, which is still better than silently failing in <10ms."""
+    if not shutil.which("git"):
+        return
+    subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=project_dir, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=bench@pulci.local",
+            "-c",
+            "user.name=bench",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+        cwd=project_dir,
+        check=True,
+    )
+
+
+def _ensure_prek_config(project_dir: pathlib.Path) -> None:
+    """Write a `.pre-commit-config.yaml` that runs the same tool set as manual
+    and pulci modes (ruff + ty + pytest, conditional on availability). Uses
+    `language: system` so prek invokes the same binaries the other modes use,
+    rather than spinning up a parallel toolchain — keeps the comparison
+    apples-to-apples."""
+    hooks_yaml = """
+      - id: ruff
+        name: ruff
+        entry: ruff check --output-format=json .
+        language: system
+        types: [python]
+        pass_filenames: false
+"""
+    if _TY_AVAILABLE:
+        hooks_yaml += """
+      - id: ty
+        name: ty
+        entry: ty check .
+        language: system
+        types: [python]
+        pass_filenames: false
+"""
+    if _PYTEST_AVAILABLE:
+        hooks_yaml += """
+      - id: pytest
+        name: pytest
+        entry: pytest --tb=short -q
+        language: system
+        types: [python]
+        pass_filenames: false
+"""
+    (project_dir / ".pre-commit-config.yaml").write_text(
+        "repos:\n  - repo: local\n    hooks:" + hooks_yaml
+    )
+
+
 def bench_prek(project_dir: pathlib.Path, n: int) -> BenchResult:
     """
     Run `prek run` per iteration (skipped if prek is not installed).
+
+    Requires the project_dir to be a git repository (caller initialises one
+    in the bench main) and a `.pre-commit-config.yaml` matching the other
+    modes' tool set (this function writes it on first call).
     """
     result = BenchResult(mode="prek")
     if not shutil.which("prek"):
         result.error = "not installed"
         return result
 
+    _ensure_prek_config(project_dir)
+
     for _ in range(n):
         t0 = time.perf_counter()
-        r = subprocess.run(["prek", "run"], capture_output=True, cwd=project_dir)
+        r = subprocess.run(["prek", "run", "--all-files"], capture_output=True, cwd=project_dir)
         elapsed = time.perf_counter() - t0
         raw = r.stdout + r.stderr
         result.iterations.append(
@@ -805,6 +874,10 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="pulci_bench_") as tmpdir:
         project_dir = pathlib.Path(tmpdir) / "fixture"
         shutil.copytree(FIXTURE_DIR, project_dir)
+        # prek requires a git repository context (`get git root` is its very
+        # first action). Initialise one so prek can run for real instead of
+        # exiting status 128 in <10ms — silently inflating its measured speed.
+        _git_init(project_dir)
         touch_target = project_dir / _TOUCH_RELATIVE
         stats = _fixture_stats(project_dir)
 
@@ -840,6 +913,7 @@ def main() -> None:
         # Burst section — isolated fixture copy to avoid state bleed from steady-state modes
         burst_dir = pathlib.Path(tmpdir) / "burst_fixture"
         shutil.copytree(FIXTURE_DIR, burst_dir)
+        _git_init(burst_dir)
         burst_files = [burst_dir / f for f in _BURST_FILES]
         burst_contents = [f.read_text() for f in burst_files]
         burst_results: list[BurstResult] = []
