@@ -141,6 +141,23 @@ fn version() -> &'static str {
     pulci_core::version()
 }
 
+/// Canonicalize `p`, then strip the Windows verbatim/UNC prefix `\\?\` so
+/// paths flowing into the accumulator, events.log, and state.json are
+/// portable for downstream consumers. Without this, the daemon stores paths
+/// like `\\?\C:\proj\foo.py` which don't match what tools or tests
+/// constructed naïvely as `C:\proj\foo.py`. No-op on non-Windows.
+fn canonicalize_portable(p: &Path) -> std::io::Result<PathBuf> {
+    let canonical = p.canonicalize()?;
+    #[cfg(windows)]
+    {
+        let s = canonical.to_string_lossy().into_owned();
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            return Ok(PathBuf::from(stripped));
+        }
+    }
+    Ok(canonical)
+}
+
 /// Group orchestrator results by the file each diagnostic targets. Returns
 /// a map keyed by every `path` in `checked_files` — files with no
 /// diagnostics get an empty Vec (the "checked clean" signal the accumulator
@@ -176,8 +193,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
     // for file events. Symptom: [watch] exclude entries silently no-op.
     // Canonicalize also normalises symlinks and trailing slashes, so the
     // single source of truth for paths is fixed before anything else runs.
-    let project_root = PathBuf::from(&path)
-        .canonicalize()
+    let project_root = canonicalize_portable(&PathBuf::from(&path))
         .map_err(|e| {
             pyo3::exceptions::PyRuntimeError::new_err(format!(
                 "could not resolve project root {path:?}: {e}"
@@ -510,7 +526,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                 // can't be checked. Falls back to the original path on
                 // canonicalize errors that aren't ENOENT.
                 let intake = |p: PathBuf, set: &mut HashSet<PathBuf>| {
-                    match p.canonicalize() {
+                    match canonicalize_portable(&p) {
                         Ok(canonical) => { set.insert(canonical); }
                         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                             // File deleted between event and intake; skip.
@@ -522,7 +538,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                 // canonical form for the rename-out case where the parent
                 // directory still resolves; fall back to the raw path.
                 let intake_removed = |p: PathBuf, set: &mut HashSet<PathBuf>| {
-                    let target = p.canonicalize().unwrap_or(p);
+                    let target = canonicalize_portable(&p).unwrap_or(p);
                     set.insert(target);
                 };
                 match first {
