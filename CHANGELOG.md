@@ -6,6 +6,81 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-05-19
+
+Closes the two open questions from 0.0.6 feedback: Q-17 (event loss
+under burst) and Q-16 (state.json scope). Q-17 ships as opt-in
+diagnostic instrumentation — the bug is too rare on healthy hardware
+(~4% on WSL2/ext4 in this session) to fix blindly, so this release
+delivers the infrastructure to name the cause when a field reproduction
+arrives. Q-16 ships as a breaking change to `state.json` semantics: the
+file now reflects the live aggregated project view instead of the last
+check pass, matching the mental model agents have when asking "is the
+project clean?".
+
+### Added
+- **Event-trace instrumentation.** Opt-in `[debug] event_trace = true`
+  in `pulci.toml` emits one JSONL record per pipeline event to
+  `.pulci/events.log` covering the four stages: watcher intake,
+  debounce window open/close, FileCache decisions, and state writes.
+  Async writer (zero impact on the critical path), backup-on-start
+  rotation, 100 MB soft cap with a `meta/log_truncated` marker, clean
+  drain on daemon shutdown. Designed for diagnosing hard-to-reproduce
+  pipeline bugs like Q-17; the flag is permanent and reusable. Per-stage
+  records include `ts_ns`, `path`, `kind`, `mtime_ns`, `size`, and
+  `content_sha256` (watcher) so cross-stage correlation is trivial with
+  `jq`. See `docs/AGENTS.md` for analysis examples.
+- **`pulci doctor` reports event-trace status** — a new "Debug" section
+  shows whether the flag is on, plus log size and event count.
+- **`FileEvent::Removed{path}` watcher variant** — exposed so consumers
+  can react to deletes and rename-out explicitly. The daemon uses it to
+  drop accumulator entries (see Changed below).
+- **MCP cancel-safety test** — verifies that cancelling a blocking
+  `pulci_status` call mid-poll propagates `CancelledError` cleanly,
+  leaves `state.json` intact, and lets the next call succeed. Closes
+  the gap noted in the 2026-05-17 failure-modes audit.
+- **Regression guard for Q-17** in `tests/test_q17_burst.py`. Passes on
+  healthy pipelines; on hardware where Q-17 fires, fails and parses
+  `events.log` in the panic message to point at the responsible stage.
+
+### Changed (BREAKING)
+- **`state.json` is now the live aggregated project view, not the
+  last check pass.** Editing one file updates that file's entry; the
+  rest stay as they were last checked. Deleted files are removed from
+  the aggregate (via watcher `Removed` events and filesystem
+  reconciliation on startup / rescan). Asking "is the project clean?"
+  finally returns the live truth.
+  - New `pulci_core::accumulator::Accumulator` (HashMap<PathBuf,
+    Vec<Diagnostic>>) is the source of truth. `build_state` reads from
+    it; `tool_errors` and `stale` stay per-pass / global.
+  - Daemon startup rebuilds the accumulator from prior `state.json`
+    and reconciles against the initial scan — entries for files deleted
+    while the daemon was off are dropped.
+  - `state.json` struct shape is unchanged (`schema_version` stays at
+    1); only the *meaning* of `diagnostics` shifts. Consumers that
+    cached the old contract should re-read `docs/AGENTS.md`,
+    `docs/ARCHITECTURE.md`, and the README "State file contract"
+    section.
+
+### Fixed
+- **Windows: paths in `state.json` and events.log no longer carry the
+  verbatim `\\?\` prefix.** `Path::canonicalize()` on Windows returns
+  UNC-form paths like `\\?\C:\proj\foo.py`; persisting those broke
+  downstream consumers (tests, agents, jq scripts) that compared
+  against `C:\proj\foo.py`. The daemon now strips the prefix on its
+  three intake sites (project_root, file events, removed events).
+- **Cross-OS file delete detection.** `notify` emits `Remove` events
+  with different `RemoveKind` discriminants per OS backend (Linux
+  inotify → `Remove(File)`, Windows ReadDirectoryChangesW →
+  `Remove(Any)`, macOS FSEvents → `Remove(Other)`). The watcher now
+  matches `Remove(_)` so the accumulator drops entries reliably
+  across platforms. Without this fix, deletes on Windows and macOS
+  silently left ghost entries in `state.json`.
+
+### Dependencies
+- Added `sha2 = "0.10"` (workspace) for content hashing in event-trace
+  records. Stack-aligned with uv (Astral), pure Rust, no C/asm.
+
 ## [0.0.6] - 2026-05-18
 
 Two rounds of feedback from the same external agent against 0.0.4 and

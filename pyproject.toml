@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pulci"
-version = "0.0.6"
+version = "0.0.7"
 description = "Continuous quality gate daemon for agent-driven Python development."
 readme = "README.md"
 license = { text = "Apache-2.0" }
