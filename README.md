@@ -107,7 +107,26 @@ else:
     # Clean. Move on.
 ```
 
-In the benchmark fixture (28 files, all hooks enabled), pulci's per-iteration cost is **339 tokens vs 2391** for the manual invocation flow — a 7× reduction, freeing the agent's context window for actual reasoning. The latency is also lower (329 ms vs 466 ms) because the daemon stays warm between checks.
+**Benchmark (0.0.7, fixture: 28 Python files, 50 iterations, ruff + ty + pytest):**
+
+| Mode | mean ms | p95 ms | tokens/call |
+|---|---:|---:|---:|
+| manual (`ruff` + `ty` + `pytest` per iteration) | 469 | 542 | 2,397 |
+| **pulci** (daemon warm, agent reads `state.json`) | **397** | 555 | 2,312 |
+| prek (`prek run --all-files` per iteration) | 630 | 1,058 | 2,491 |
+
+Single-edit latency: pulci is ~15% faster than direct invocation and ~1.6× faster than prek. Token cost is similar across modes because pulci's `state.json` now carries the *live aggregated project view* (every file's current diagnostics, not just the file you touched) — agents that ask "is the project clean?" get the real answer in one read instead of running tools again.
+
+**Where the savings really show up is burst editing** (5 files edited in quick succession, simulating an agent applying a multi-file refactor):
+
+| Mode | tokens/burst | mean s/burst |
+|---|---:|---:|
+| manual (5 separate tool invocations) | 12,040 | 2.81 |
+| **pulci** (one daemon read for the whole batch) | **2,337** | **0.52** |
+
+That is a **5.2× token reduction and 5.4× faster** because pulci batches the changes through one debounce window and exposes the result as a single state read, while manual invocation pays the cold start per file.
+
+Reproduce: `uv run python benchmarks/bench_modes.py --iterations 50` (see [`benchmarks/README.md`](benchmarks/README.md) for methodology and how to expand the fixture).
 
 The MCP tool docstring documents the exact response shapes for `not_running`, `running_no_checks_yet`, `timeout`, `error`, and `tool_errors` so an agent can branch cleanly on each — see [`docs/AGENTS.md`](docs/AGENTS.md#handling-edge-cases) for the full table.
 
