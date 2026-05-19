@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use anyhow::Context;
-use notify::event::{EventKind, ModifyKind, RemoveKind, RenameMode};
+use notify::event::{EventKind, ModifyKind, RenameMode};
 use notify::{recommended_watcher, RecursiveMode, Watcher};
 
 const IGNORED_DIRS: &[&str] = &[
@@ -81,9 +81,16 @@ pub fn watch(
                     }
                     continue;
                 }
+                // Notify reports remove events with different `RemoveKind`
+                // discriminants depending on the OS backend: Linux inotify
+                // gives `Remove(File)`, Windows ReadDirectoryChangesW gives
+                // `Remove(Any)`, macOS FSEvents may give `Remove(Other)`.
+                // Match all `Remove(*)` so the accumulator drops the entry
+                // cross-platform. `Modify(Name(RenameMode::From))` covers
+                // rename-out (old path effectively deleted).
                 let is_removal = matches!(
                     event.kind,
-                    EventKind::Remove(RemoveKind::File)
+                    EventKind::Remove(_)
                         | EventKind::Modify(ModifyKind::Name(RenameMode::From))
                 );
                 for path in event.paths {
