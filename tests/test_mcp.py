@@ -195,3 +195,39 @@ def test_wait_for_no_daemon_during_wait(tmp_path: pathlib.Path) -> None:
     # State file missing from the start with wait params → not_running
     result = _run(pulci_status(str(tmp_path), since_version=0, timeout_ms=200))
     assert result["status"] == "not_running"
+
+
+def test_pulci_status_cancellation_is_cancel_safe(tmp_path: pathlib.Path) -> None:
+    """An MCP client disconnecting mid-poll cancels the pulci_status task.
+    The cancellation must propagate cleanly: no exception masked, no
+    state.json corruption, and the file remains readable for the next call.
+
+    Closes the failure-modes audit gap: "MCP cliente desconecta mid-poll —
+    parece OK, sin test explícito" (docs/plans/2026-05-17-failure-modes-audit.md).
+    """
+    state_dir = tmp_path / ".pulci"
+    _write_state(state_dir, {**MINIMAL_STATE, "state_version": 1})
+    _write_heartbeat(state_dir)
+
+    async def run_test() -> None:
+        # Block indefinitely (since_version >> current) then cancel.
+        task = asyncio.create_task(
+            pulci_status(str(tmp_path), since_version=10**9, timeout_ms=10_000)
+        )
+        # Give the task a moment to enter its poll loop.
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    _run(run_test())
+
+    # state.json must still be intact and readable.
+    state_file = state_dir / "state.json"
+    assert state_file.exists()
+    loaded = json.loads(state_file.read_text())
+    assert loaded["state_version"] == 1
+
+    # Next call must succeed (no lingering lock / file handle).
+    follow_up = _run(pulci_status(str(tmp_path)))
+    assert follow_up["state_version"] == 1
