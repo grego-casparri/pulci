@@ -138,17 +138,16 @@ rename is atomic on the same filesystem, so a reader sees either the previous
 complete state or the new complete state — never a partial. There is no
 incremental update path; every write is a whole `State`.
 
-**State scope is the last check pass, not the project.** Each `state.json`
-write reflects the diagnostics from the files just checked, not a cumulative
-view across the project. The initial sweep at daemon startup writes a state
-with every diagnostic found in every source file; every subsequent change
-replaces that with the diagnostics from just the changed files. A consumer
-that wants "is this project clean?" needs the post-startup snapshot or to
-trigger a rescan, not the most recent post-edit state. Per-file accumulating
-state — where editing `foo.py` clears only its own diagnostics — is a
-candidate redesign for a future release; the current "last check pass"
-semantic is intentional for the iteration-time use case ("did my edit
-regress anything?") and minimises the in-memory state pulci has to track.
+**State scope is the current state of the project.** Each `state.json` write
+reflects the *aggregated* diagnostics across every source file the daemon
+has observed, not just the files in the last check pass. A consumer that
+asks "is the project clean?" after editing one file gets back the live
+project view — that file plus every other file's current diagnostics.
+
+The aggregation is in-memory in the daemon (the `Accumulator` in
+`pulci-core::accumulator`) and rebuilt from `state.json` on daemon restart.
+Deleted files are removed from the aggregate (via watcher remove/rename
+events, and reconciled against the filesystem on initial scan / rescan).
 
 **Monotonic `state_version`.** Incremented exactly once per `build_state` call,
 which happens exactly once per check pass. The counter never decreases —

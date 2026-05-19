@@ -72,32 +72,25 @@ This returns the aggregated diagnostics. Shape:
 
 Severity values: `"error"`, `"warning"`, `"info"`. Most adapters emit only `"error"` and `"warning"`. Handle `"info"` gracefully (do not treat as an error).
 
-### Scope of `diagnostics`: last check pass, not project-wide
+### Scope of `diagnostics`: live project state
 
-**Important contract detail.** Each `state.json` write is a snapshot of the
-files just checked, not a cumulative view of every problem in the project.
+**Contract.** Each `state.json` write reflects the *current aggregated
+state* of every source file the daemon has observed. The `diagnostics`
+array is the union of per-file diagnostics from the most recent check of
+each file. Editing one file updates only that file's entry; the rest stay
+as they were last checked.
 
-- At daemon startup, the initial sweep checks every source file and writes
-  a state with every diagnostic found across the project.
-- After that, each file change triggers a check pass on the changed files
-  only. The resulting `state.json` carries the diagnostics from *that* pass
-  — replacing the previous state, not merging into it.
+Example: an initial sweep across the project reports 2397 errors in N
+files. You then edit `foo.py` (which has 4 errors). The next `state.json`
+shows `summary.errors == 2397 - prior_foo_errors + 4` and `diagnostics`
+includes both foo.py's new diagnostics and every other file's existing
+diagnostics. Asking "is the project clean?" gets back the live truth.
 
-Concretely: if the initial sweep found 2397 errors across 156 files, and
-you then edit `foo.py` (which has 4 errors), the next `state.json` shows
-`summary.errors == 4` and 4 diagnostics — all in `foo.py`. The 2393 errors
-in the other 155 files **did not disappear**; they're just not in the
-current snapshot.
-
-If the question you want answered is "did my edit introduce a regression?",
-this is exactly what you want — the snapshot tells you about the change.
-If the question is "is the project clean?", you need to consult the post-
-sweep state (preserved in git history of `state.json` between runs is not
-maintained, so you'd restart the daemon to get a fresh full snapshot).
-
-Per-file accumulating state — where editing `foo.py` cleans only its own
-diagnostics and leaves everyone else's intact — is tracked for a future
-release. For 0.0.x, "what just changed" is the working semantic.
+Files are removed from the aggregate when:
+- watcher detects a delete or rename-out (`FileEvent::Removed`)
+- initial scan / rescan reconciles against the current filesystem (entries
+  for files no longer on disk are dropped)
+- the daemon restarts and the prior file is gone (rebuild + reconcile)
 
 ### `summary.checks_run`
 

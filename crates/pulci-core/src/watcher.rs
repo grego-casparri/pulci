@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use anyhow::Context;
+use notify::event::{EventKind, ModifyKind, RemoveKind, RenameMode};
 use notify::{recommended_watcher, RecursiveMode, Watcher};
 
 const IGNORED_DIRS: &[&str] = &[
@@ -24,9 +25,12 @@ const IGNORED_PREFIXES: &[&str] = &["pytest-cache-files-"];
 /// `Rescan` is emitted when the underlying notify backend reports that some
 /// events were lost (e.g. Linux inotify queue overflow). Consumers must treat
 /// it as "any file under the watched root may have changed" and re-scan.
+/// `Removed` is emitted on delete events and rename-out so the accumulator
+/// can drop the file's entry.
 #[derive(Debug)]
 pub enum FileEvent {
     Changed { path: PathBuf, kind: String },
+    Removed { path: PathBuf },
     Rescan,
 }
 
@@ -77,8 +81,28 @@ pub fn watch(
                     }
                     continue;
                 }
+                let is_removal = matches!(
+                    event.kind,
+                    EventKind::Remove(RemoveKind::File)
+                        | EventKind::Modify(ModifyKind::Name(RenameMode::From))
+                );
                 for path in event.paths {
-                    if !is_ignored(&path) {
+                    if is_ignored(&path) {
+                        continue;
+                    }
+                    let fe = if is_removal {
+                        if let Some(tracer) = crate::event_trace::tracer() {
+                            tracer.send(crate::event_trace::EventRecord::Watcher {
+                                ts_ns: crate::event_trace::ts_ns_now(),
+                                path: path.clone(),
+                                kind: format!("{:?}", event.kind),
+                                mtime_ns: None,
+                                size: None,
+                                content_sha256: None,
+                            });
+                        }
+                        FileEvent::Removed { path }
+                    } else {
                         let kind = format!("{:?}", event.kind);
                         if let Some(tracer) = crate::event_trace::tracer() {
                             let (mtime_ns, size) = std::fs::metadata(&path)
@@ -102,10 +126,10 @@ pub fn watch(
                                 content_sha256: sha,
                             });
                         }
-                        let fe = FileEvent::Changed { path, kind };
-                        if tx.send(fe).is_err() {
-                            return Ok(());
-                        }
+                        FileEvent::Changed { path, kind }
+                    };
+                    if tx.send(fe).is_err() {
+                        return Ok(());
                     }
                 }
             }
@@ -181,6 +205,51 @@ mod tests {
         assert!(!is_ignored(Path::new("tests/test_smoke.py")));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn remove_file_event_emits_removed_variant() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let tmp = std::env::temp_dir().join(format!("pulci_rm_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let file = tmp.join("victim.py");
+        std::fs::write(&file, b"x = 1").unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let watch_path = tmp.clone();
+        std::thread::spawn(move || {
+            let _ = watch(WatcherConfig { path: watch_path }, tx, ready_tx);
+        });
+        ready_rx.recv_timeout(Duration::from_secs(5)).expect("ready");
+
+        // Drain any pending events from the initial write (Create/Modify).
+        let drain_deadline = Instant::now() + Duration::from_millis(200);
+        while Instant::now() < drain_deadline {
+            let _ = rx.recv_timeout(Duration::from_millis(50));
+        }
+
+        std::fs::remove_file(&file).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut saw_removed = false;
+        while Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(FileEvent::Removed { path }) => {
+                    saw_removed = path.ends_with("victim.py");
+                    if saw_removed { break; }
+                }
+                Ok(_) => continue,
+                Err(_) => break,
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(saw_removed, "expected FileEvent::Removed for deleted file");
+    }
+
     /// Q-17 hipótesis 2/3 regression guard. Escribir 8 archivos en burst tight
     /// debe producir al menos 8 `Changed` events en el watcher. Si este test
     /// falla con `changed < N`: confirmación parcial de hipótesis 2 (notify
@@ -217,6 +286,7 @@ mod tests {
             match rx.recv_timeout(Duration::from_millis(200)) {
                 Ok(FileEvent::Changed { .. }) => changed += 1,
                 Ok(FileEvent::Rescan) => saw_rescan = true,
+                Ok(FileEvent::Removed { .. }) => continue,
                 Err(_) => break,
             }
         }
@@ -350,6 +420,7 @@ mod tests {
                 Ok(FileEvent::Changed { .. }) => {
                     total_changed += 1;
                 }
+                Ok(FileEvent::Removed { .. }) => continue,
                 Err(_) => continue,
             }
         }

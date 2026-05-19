@@ -141,6 +141,26 @@ fn version() -> &'static str {
     pulci_core::version()
 }
 
+/// Group orchestrator results by the file each diagnostic targets. Returns
+/// a map keyed by every `path` in `checked_files` — files with no
+/// diagnostics get an empty Vec (the "checked clean" signal the accumulator
+/// needs).
+fn group_results_by_file(
+    pass_results: &[pulci_core::orchestrator::RunResult],
+    checked_files: &[std::path::PathBuf],
+) -> std::collections::HashMap<std::path::PathBuf, Vec<pulci_core::hooks::Diagnostic>> {
+    let mut by_file: std::collections::HashMap<
+        std::path::PathBuf,
+        Vec<pulci_core::hooks::Diagnostic>,
+    > = checked_files.iter().map(|p| (p.clone(), Vec::new())).collect();
+    for r in pass_results {
+        for d in &r.diagnostics {
+            by_file.entry(d.file.clone()).or_default().push(d.clone());
+        }
+    }
+    by_file
+}
+
 /// Watch `path` for changes, run quality hooks, and write `.pulci/state.json`.
 ///
 /// When `agent` is true, each check event is printed as compiler-style diagnostics
@@ -303,6 +323,15 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
         .as_ref()
         .is_some_and(|prev| pulci_core::state::tools_changed(&prev.tools, &tool_infos));
 
+    // Live aggregated diagnostics for the project. Seeded from the prior
+    // state.json so a daemon restart keeps the cross-file view; reconciled
+    // against the initial scan to drop entries for files deleted offline.
+    use pulci_core::accumulator::Accumulator;
+    let mut accumulator = match prev_state.as_ref() {
+        Some(s) => Accumulator::from_state(s),
+        None => Accumulator::new(),
+    };
+
     let heartbeat_path = project_root.join(".pulci").join("heartbeat");
     let project_root_for_scan = project_root.clone();
     let config_watcher = WatcherConfig { path: project_root };
@@ -386,16 +415,25 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
     // Initial full-project scan so state.json exists before the first file event.
     {
         let all_py = collect_py_files(&project_root_for_scan, &project_root_for_scan, &config.watch.exclude);
+        // Reconcile up front: drop any prev_state entry whose file no longer
+        // exists on disk (offline delete between daemon runs). Files that
+        // exist but weren't changed keep their prior diagnostics; the
+        // changed subset gets overwritten by the orchestrator pass below.
+        let initial_files: std::collections::HashSet<std::path::PathBuf> =
+            all_py.iter().cloned().collect();
+        accumulator.reconcile_with(&initial_files);
         let changed = cache.filter_changed(&all_py);
         if !changed.is_empty() {
             let t0 = Instant::now();
-            let (results, state) = py.allow_threads(|| {
-                let r = rt.block_on(orchestrator.run(&changed));
-                let s = build_state(&r, tool_infos.clone(), stale);
-                (r, s)
-            });
-            let _ = results;
+            let results = py.allow_threads(|| rt.block_on(orchestrator.run(&changed)));
             stale = false;
+
+            let by_file = group_results_by_file(&results, &changed);
+            for (path, diags) in by_file {
+                accumulator.update(path, diags);
+            }
+            let state = build_state(&accumulator, &results, tool_infos.clone(), stale);
+
             // Initial sweep on a real project produces 2000+ diagnostics —
             // streaming them line-by-line floods stdout (~370 KB) and fills
             // host pipe buffers for agents that launched pulci as a
@@ -424,6 +462,16 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                     }
                 }
             }
+        } else if prev_state.is_some() {
+            // No file content changed since last run, but prev_state existed —
+            // possibly with stale entries for files we just reconciled out.
+            // Write a fresh state.json reflecting the (possibly trimmed)
+            // accumulator so consumers see the live truth on restart.
+            let state = build_state(&accumulator, &[], tool_infos.clone(), stale);
+            stale = false;
+            if let Err(e) = write_state(&state_file, &state) {
+                eprintln!("pulci: failed to write post-restart state: {e}");
+            }
         }
     }
 
@@ -449,6 +497,7 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                     });
                 }
                 let mut paths: HashSet<PathBuf> = HashSet::new();
+                let mut removed_paths: HashSet<PathBuf> = HashSet::new();
                 let mut needs_rescan = false;
                 // Canonicalize every event path at intake. notify does NOT
                 // guarantee absolute vs relative consistency across backends
@@ -469,9 +518,17 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                         Err(_) => { set.insert(p); }
                     }
                 };
+                // Removed events can't canonicalize (file is gone). Try the
+                // canonical form for the rename-out case where the parent
+                // directory still resolves; fall back to the raw path.
+                let intake_removed = |p: PathBuf, set: &mut HashSet<PathBuf>| {
+                    let target = p.canonicalize().unwrap_or(p);
+                    set.insert(target);
+                };
                 match first {
                     FileEvent::Rescan => { needs_rescan = true; }
                     FileEvent::Changed { path, .. } => { intake(path, &mut paths); }
+                    FileEvent::Removed { path } => { intake_removed(path, &mut removed_paths); }
                 }
                 let deadline = Instant::now() + Duration::from_millis(50);
                 loop {
@@ -482,8 +539,16 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                     match rx.recv_timeout(remaining) {
                         Ok(FileEvent::Rescan) => { needs_rescan = true; }
                         Ok(FileEvent::Changed { path, .. }) => { intake(path, &mut paths); }
+                        Ok(FileEvent::Removed { path }) => { intake_removed(path, &mut removed_paths); }
                         Err(_) => break,
                     }
+                }
+                // If a file was both modified and removed in the same window
+                // (rapid edit + delete, or rename-out where the same path
+                // appeared via Create then Modify(Name(From))), treat it as
+                // removed: the orchestrator can't check a missing file.
+                for rp in &removed_paths {
+                    paths.remove(rp);
                 }
 
                 let files: Vec<PathBuf> = if needs_rescan {
@@ -510,18 +575,59 @@ fn start(py: Python<'_>, path: String, agent: bool) -> PyResult<()> {
                         files: Some(files.clone()),
                     });
                 }
+
+                // Apply deletions to the accumulator before anything else so
+                // a Removed-only batch still trims state.json.
+                for rp in &removed_paths {
+                    accumulator.remove(rp);
+                }
+
                 let changed = cache.filter_changed(&files);
                 if changed.is_empty() {
+                    // No checks to run, but if we removed entries (or a
+                    // rescan needs reconciliation) we still owe consumers a
+                    // fresh state.json.
+                    let did_rescan_reconcile = needs_rescan && {
+                        let current: std::collections::HashSet<PathBuf> =
+                            files.iter().cloned().collect();
+                        accumulator.reconcile_with(&current);
+                        true
+                    };
+                    if !removed_paths.is_empty() || did_rescan_reconcile {
+                        let state = build_state(&accumulator, &[], tool_infos.clone(), stale);
+                        stale = false;
+                        match write_state(&state_file, &state) {
+                            Ok(()) => { consecutive_write_errors = 0; }
+                            Err(e) => {
+                                eprintln!("pulci: failed to write state: {e}");
+                                consecutive_write_errors += 1;
+                                if consecutive_write_errors >= MAX_CONSECUTIVE_WRITE_ERRORS {
+                                    return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                                        "pulci aborting: {MAX_CONSECUTIVE_WRITE_ERRORS} consecutive state.json writes failed. Last error: {e}. \
+                                         Check disk space and .pulci/ permissions."
+                                    )));
+                                }
+                            }
+                        }
+                    }
                     continue;
                 }
 
                 let t0 = Instant::now();
-                let (results, state) = py.allow_threads(|| {
-                    let r = rt.block_on(orchestrator.run(&changed));
-                    let s = build_state(&r, tool_infos.clone(), stale);
-                    (r, s)
-                });
-                let _ = results;
+                let results = py.allow_threads(|| rt.block_on(orchestrator.run(&changed)));
+
+                let by_file = group_results_by_file(&results, &changed);
+                for (path, diags) in by_file {
+                    accumulator.update(path, diags);
+                }
+                if needs_rescan {
+                    // After a re-collect, trim any accumulator entry whose
+                    // path no longer appears in the current file set.
+                    let current: std::collections::HashSet<PathBuf> =
+                        files.iter().cloned().collect();
+                    accumulator.reconcile_with(&current);
+                }
+                let state = build_state(&accumulator, &results, tool_infos.clone(), stale);
                 stale = false; // only first run after tool change is stale
                 py.check_signals()?;
 

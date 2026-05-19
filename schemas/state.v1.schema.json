@@ -20,7 +20,7 @@
     "timestamp": {
       "type": "string",
       "format": "date-time",
-      "description": "ISO 8601 UTC timestamp of the last check pass."
+      "description": "ISO 8601 UTC timestamp of the last state.json write."
     },
     "summary": {
       "type": "object",
@@ -29,12 +29,13 @@
       "properties": {
         "errors":     { "type": "integer", "minimum": 0 },
         "warnings":   { "type": "integer", "minimum": 0 },
-        "checks_run": { "type": "integer", "minimum": 0, "description": "Number of hook adapters that ran." },
+        "checks_run": { "type": "integer", "minimum": 0, "description": "Monotonic counter incremented on every check pass since first daemon run, persisted across restarts." },
         "stale":      { "type": "boolean", "description": "True when resolved tools changed since last daemon start." }
       }
     },
     "diagnostics": {
       "type": "array",
+      "description": "Live aggregated diagnostics across every file the daemon has observed. Editing one file updates only that file's entries; the rest stay as they were last checked. Files deleted from disk are removed from the aggregate.",
       "items": {
         "type": "object",
         "required": ["tool", "file", "line", "col", "severity", "message"],

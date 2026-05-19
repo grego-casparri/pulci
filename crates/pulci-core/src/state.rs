@@ -97,30 +97,28 @@ pub struct Summary {
     pub stale: bool,
 }
 
-/// Aggregate hook results into a `State` ready to be written to disk.
-pub fn build_state(results: &[RunResult], tools: Vec<ToolInfo>, stale: bool) -> State {
-    let mut all_diagnostics: Vec<Diagnostic> = results
-        .iter()
-        .flat_map(|r| r.diagnostics.iter().cloned())
-        .collect();
-
-    all_diagnostics.sort_by(|a, b| {
-        a.file
-            .cmp(&b.file)
-            .then(a.line.cmp(&b.line))
-            .then(a.col.cmp(&b.col))
-    });
-
-    let errors = all_diagnostics
+/// Build the `State` that will be written to `state.json`. Diagnostics come
+/// from the accumulator (the live per-file view of the project); tool_errors
+/// come from this pass's results only (they describe the pass, not the
+/// project). `stale` is the global flag set when resolved tool versions
+/// changed since the last daemon start.
+pub fn build_state(
+    accumulator: &crate::accumulator::Accumulator,
+    pass_results: &[RunResult],
+    tools: Vec<ToolInfo>,
+    stale: bool,
+) -> State {
+    let diagnostics = accumulator.snapshot();
+    let errors = diagnostics
         .iter()
         .filter(|d| d.severity == Severity::Error)
         .count() as u32;
-    let warnings = all_diagnostics
+    let warnings = diagnostics
         .iter()
         .filter(|d| d.severity == Severity::Warning)
         .count() as u32;
 
-    let mut tool_errors: Vec<ToolError> = results
+    let mut tool_errors: Vec<ToolError> = pass_results
         .iter()
         .filter_map(|r| {
             r.error.as_ref().map(|msg| ToolError {
@@ -131,11 +129,6 @@ pub fn build_state(results: &[RunResult], tools: Vec<ToolInfo>, stale: bool) -> 
         .collect();
     tool_errors.sort_by(|a, b| a.tool.cmp(&b.tool));
 
-    // `checks_run` historically was `results.len()` — the number of hook
-    // adapters active in THIS pass, which on a default config is 2 forever.
-    // The name promised a cumulative counter, and an external agent flagged
-    // the mismatch in 0.0.5. Reinterpreted in 0.0.6 to actually mean "how
-    // many check passes has this daemon produced", monotonic across restarts.
     let checks_run = next_check_pass();
 
     State {
@@ -148,7 +141,7 @@ pub fn build_state(results: &[RunResult], tools: Vec<ToolInfo>, stale: bool) -> 
             checks_run: checks_run.min(u32::MAX as u64) as u32,
             stale,
         },
-        diagnostics: all_diagnostics,
+        diagnostics,
         tools,
         tool_errors,
     }
@@ -276,12 +269,29 @@ mod tests {
         }
     }
 
+    fn acc_from_results(results: &[RunResult]) -> crate::accumulator::Accumulator {
+        let mut acc = crate::accumulator::Accumulator::new();
+        let mut by_file: std::collections::HashMap<PathBuf, Vec<Diagnostic>> =
+            std::collections::HashMap::new();
+        for r in results {
+            for d in &r.diagnostics {
+                by_file.entry(d.file.clone()).or_default().push(d.clone());
+            }
+        }
+        for (path, diags) in by_file {
+            acc.update(path, diags);
+        }
+        acc
+    }
+
     #[test]
     fn build_counts_correctly() {
         // checks_run is a global monotonic counter since 0.0.6 — it depends
         // on the order tests run, so don't assert a specific value. Diagnostic
         // counts still come from the input and ARE deterministic.
-        let state = build_state(&[make_result(2, 1)], vec![], false);
+        let results = vec![make_result(2, 1)];
+        let acc = acc_from_results(&results);
+        let state = build_state(&acc, &results, vec![], false);
         assert_eq!(state.summary.errors, 2);
         assert_eq!(state.summary.warnings, 1);
         assert!(state.summary.checks_run > 0);
@@ -291,7 +301,8 @@ mod tests {
 
     #[test]
     fn build_empty_results() {
-        let state = build_state(&[], vec![], false);
+        let acc = crate::accumulator::Accumulator::new();
+        let state = build_state(&acc, &[], vec![], false);
         assert_eq!(state.summary.errors, 0);
         // checks_run increments even when zero hooks ran — it reflects
         // check passes, not hook count.
@@ -305,8 +316,9 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         seed_check_passes(100);
-        let a = build_state(&[], vec![], false).summary.checks_run;
-        let b = build_state(&[], vec![], false).summary.checks_run;
+        let acc = crate::accumulator::Accumulator::new();
+        let a = build_state(&acc, &[], vec![], false).summary.checks_run;
+        let b = build_state(&acc, &[], vec![], false).summary.checks_run;
         assert_eq!(a, 101);
         assert_eq!(b, 102);
     }
@@ -314,7 +326,9 @@ mod tests {
     #[test]
     fn write_and_read_roundtrip() {
         let path = tmp_state_path();
-        let state = build_state(&[make_result(1, 0)], vec![], false);
+        let results = vec![make_result(1, 0)];
+        let acc = acc_from_results(&results);
+        let state = build_state(&acc, &results, vec![], false);
         write_state(&path, &state).unwrap();
 
         let loaded = read_state(&path).unwrap();
@@ -328,7 +342,8 @@ mod tests {
     #[test]
     fn write_is_atomic_no_tmp_remains() {
         let path = tmp_state_path();
-        write_state(&path, &build_state(&[], vec![], false)).unwrap();
+        let acc = crate::accumulator::Accumulator::new();
+        write_state(&path, &build_state(&acc, &[], vec![], false)).unwrap();
         assert!(path.exists());
         assert!(!path.with_extension("json.tmp").exists());
         fs::remove_dir_all(path.parent().unwrap()).ok();
@@ -402,7 +417,9 @@ mod tests {
                 message: "a".into(),
             },
         ];
-        let state = build_state(&[results], vec![], false);
+        let results_vec = vec![results];
+        let acc = acc_from_results(&results_vec);
+        let state = build_state(&acc, &results_vec, vec![], false);
         assert_eq!(state.diagnostics[0].file, PathBuf::from("a.py"));
         assert_eq!(state.diagnostics[1].file, PathBuf::from("b.py"));
     }
@@ -416,7 +433,8 @@ mod tests {
             source: "local-venv".into(),
             path: Some(".venv/bin/ruff".into()),
         }];
-        let state = build_state(&[], tools, false);
+        let acc = crate::accumulator::Accumulator::new();
+        let state = build_state(&acc, &[], tools, false);
         write_state(&path, &state).unwrap();
         let loaded = read_state(&path).unwrap();
         assert_eq!(loaded.tools.len(), 1);
@@ -441,7 +459,8 @@ mod tests {
     #[test]
     fn stale_flag_is_persisted() {
         let path = tmp_state_path();
-        let state = build_state(&[], vec![], true);
+        let acc = crate::accumulator::Accumulator::new();
+        let state = build_state(&acc, &[], vec![], true);
         write_state(&path, &state).unwrap();
         let loaded = read_state(&path).unwrap();
         assert!(loaded.summary.stale);
@@ -450,17 +469,20 @@ mod tests {
 
     #[test]
     fn tool_errors_aggregated_from_failed_results() {
-        let r_ok = RunResult {
-            tool: "ruff".into(),
-            diagnostics: vec![],
-            error: None,
-        };
-        let r_err = RunResult {
-            tool: "pytest".into(),
-            diagnostics: vec![],
-            error: Some("pytest timed out after 120s and was killed by pulci".into()),
-        };
-        let state = build_state(&[r_ok, r_err], vec![], false);
+        let results = vec![
+            RunResult {
+                tool: "ruff".into(),
+                diagnostics: vec![],
+                error: None,
+            },
+            RunResult {
+                tool: "pytest".into(),
+                diagnostics: vec![],
+                error: Some("pytest timed out after 120s and was killed by pulci".into()),
+            },
+        ];
+        let acc = acc_from_results(&results);
+        let state = build_state(&acc, &results, vec![], false);
         assert_eq!(state.tool_errors.len(), 1);
         assert_eq!(state.tool_errors[0].tool, "pytest");
         assert!(state.tool_errors[0].message.contains("timed out"));
@@ -471,7 +493,9 @@ mod tests {
 
     #[test]
     fn tool_errors_empty_when_all_results_ok() {
-        let state = build_state(&[make_result(1, 0)], vec![], false);
+        let results = vec![make_result(1, 0)];
+        let acc = acc_from_results(&results);
+        let state = build_state(&acc, &results, vec![], false);
         assert!(state.tool_errors.is_empty());
     }
 
@@ -489,7 +513,8 @@ mod tests {
                 error: Some("cargo not found".into()),
             },
         ];
-        let state = build_state(&results, vec![], false);
+        let acc = acc_from_results(&results);
+        let state = build_state(&acc, &results, vec![], false);
         assert_eq!(state.tool_errors[0].tool, "clippy");
         assert_eq!(state.tool_errors[1].tool, "ty");
     }

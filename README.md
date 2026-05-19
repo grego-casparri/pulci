@@ -268,26 +268,22 @@ manual tool output grows linearly with the number of violations.
 `.pulci/state.json` is the primary contract between pulci and consumers.
 Schema version is `1` and will be bumped on breaking changes.
 
-**Scope of `diagnostics`.** Each write of `state.json` reflects the *last
-check pass*, not the cumulative state of the whole project. The initial
-sweep at daemon startup populates state with diagnostics across every
-watched source file; every subsequent file change replaces that with the
-diagnostics from the files in that change. A consumer that asks "is the
-project clean?" after editing one file gets back "the files just checked
-are clean", not "no problems anywhere". This is intentional for the
-iteration loop (the relevant question is "did my edit introduce errors?"),
-but the difference matters for agents tracking project-wide health —
-they should consult the post-startup sweep snapshot, or trigger a rescan,
-when they want the full view.
+**Scope of `diagnostics`.** Each `state.json` write is the *live aggregated
+state* of every source file the daemon has observed. Editing one file
+updates that file's entry; the rest stay as they were last checked. Files
+deleted from disk are removed from the aggregate (via watcher events and
+filesystem reconciliation). Asking "is the project clean?" gets back the
+live truth, not just the last batch.
 
 **`stale: true`** appears when pulci detects that the tool binaries
 changed between daemon runs (e.g. ruff was upgraded in the venv). It
 goes back to `false` after the next check pass. Treat a `stale: true`
 state as a fresh full re-check, not stale data.
 
-**`summary.checks_run`** is the count of hook adapters that ran in the
-last check pass (typically 2-4 depending on which hooks are enabled),
-not a cumulative counter of total check passes since daemon start.
+**`summary.checks_run`** is a monotonic counter incremented on every check
+pass since the daemon's first run, persisted across restarts via the prior
+`state.json`. It tells consumers "how much work has the daemon done",
+useful for `since_version`-style polling.
 
 - Full schema: [`schemas/state.v1.schema.json`](schemas/state.v1.schema.json)
 - Config schema: [`schemas/pulci-toml.schema.json`](schemas/pulci-toml.schema.json)

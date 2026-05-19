@@ -17,6 +17,7 @@ pub fn version() -> &'static str {
     VERSION
 }
 
+pub mod accumulator;
 pub mod cache;
 pub mod config;
 pub mod event_trace;
