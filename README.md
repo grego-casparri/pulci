@@ -1,13 +1,11 @@
 # pulci
 
-> Continuous quality gate daemon for agent-driven Python development.
+> Quality gates that run between edits — so AI agents query state instead of re-running tools.
 
+[![PyPI version](https://img.shields.io/pypi/v/pulci.svg)](https://pypi.org/project/pulci/)
+[![Python versions](https://img.shields.io/pypi/pyversions/pulci.svg)](https://pypi.org/project/pulci/)
 [![CI](https://github.com/grego-casparri/pulci/actions/workflows/ci.yml/badge.svg)](https://github.com/grego-casparri/pulci/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
-
-**v0.0.6** — Apache-2.0 — [docs/AGENTS.md](docs/AGENTS.md)
 
 ## Why
 
