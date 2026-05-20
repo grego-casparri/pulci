@@ -6,8 +6,8 @@ been simpler / different?"
 
 ## Two-language hybrid: Rust core, Python wrapper
 
-The same Astral playbook used by `uv`, `ruff`, `ty`: the engine lives in
-Rust, the user interface lives in Python. Why this split:
+The same split used by `uv`, `ruff`, and `ty`: the engine lives in Rust,
+the user interface lives in Python. Why this split:
 
 - **Rust core** handles the work where speed and correctness matter:
   filesystem watching, parallel subprocess orchestration, JSON aggregation,

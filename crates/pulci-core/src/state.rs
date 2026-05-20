@@ -75,7 +75,7 @@ pub struct State {
     pub schema_version: u32,
     /// Monotonically increasing counter incremented on every atomic write.
     /// Agents use this to detect that a new result was produced since their
-    /// last read (see D-013: wait_for + since_version synchronisation).
+    /// last read; see `docs/AGENTS.md` for the `since_version` polling pattern.
     #[serde(default)]
     pub state_version: u64,
     pub timestamp: String,

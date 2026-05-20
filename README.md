@@ -31,7 +31,7 @@ structured JSON. Agents stop re-invoking tools; they query state.
 | pytest-watch  | File change         | Human terminal        | Humans      |
 | **pulci**     | **Iteration time**  | **Compiler-style + JSON** | **Agents**  |
 
-pulci does **not** replace any of these. It fills the empty quadrant.
+pulci does **not** replace any of these. Each row runs in a different slot — pulci is the one that runs while you are editing.
 
 ## Demo
 
