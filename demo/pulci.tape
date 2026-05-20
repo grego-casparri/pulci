@@ -13,6 +13,7 @@ Hide
 Type "alias pulci='bash demo/_sim.sh'"
 Enter
 Sleep 200ms
+Ctrl+L
 Show
 
 Type "pulci start ."
