@@ -39,7 +39,7 @@ body:
     id: version
     attributes:
       label: pulci version
-      placeholder: "0.0.1"
+      placeholder: "(see pulci --version)"
     validations:
       required: true
 
