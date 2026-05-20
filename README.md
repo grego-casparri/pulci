@@ -35,38 +35,7 @@ pulci does **not** replace any of these. Each row runs at a different moment of 
 
 ![pulci watching a project for changes](demo/pulci.gif)
 
-## MCP server
-
-pulci ships an MCP server for Claude Desktop, Cursor, and any MCP-compatible host.
-
-**Auto-install** (recommended) — writes the entry into the host's config file directly, preserving any other MCP servers you have:
-
-```bash
-pulci mcp install claude-desktop      # ~/Library/Application Support/Claude/...
-pulci mcp install cursor              # .cursor/mcp.json (project-local)
-pulci mcp install cursor --global     # ~/.cursor/mcp.json (all projects)
-pulci mcp install cursor --dry-run    # preview without writing
-```
-
-For Claude Code, use its native `claude mcp add pulci $(which pulci) mcp` instead.
-
-**Manual setup** — `pulci mcp info` prints the JSON block you can paste yourself:
-
-```json
-{
-  "mcpServers": {
-    "pulci": {
-      "command": "/path/to/.venv/bin/pulci",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-Once configured, the host exposes the `pulci_status` tool — agents call it instead of
-invoking ruff/ty/pytest directly.
-
-## Real example: what the agent loop looks like
+## How the agent loop works
 
 I built pulci because I wanted my own Claude Code sessions to stop wasting tokens re-invoking ruff after every edit. Here is the actual loop:
 
@@ -128,43 +97,7 @@ Reproduce: `uv run python benchmarks/bench_modes.py --iterations 50` (see [`benc
 
 The MCP tool docstring documents the exact response shapes for `not_running`, `running_no_checks_yet`, `timeout`, `error`, and `tool_errors` so an agent can branch cleanly on each — see [`docs/AGENTS.md`](docs/AGENTS.md#handling-edge-cases) for the full table.
 
-## Diagnose your setup: `pulci doctor`
-
-When something looks wrong, `pulci doctor` tells you which layer is broken
-without running the daemon:
-
-```bash
-$ pulci doctor
-Configuration
-  ✓ project root       /home/me/my-project
-  ✓ pulci.toml         valid; enabled hooks: ruff, ty, pytest
-
-Tool resolution
-  ✓ ruff               0.7.4     via local-venv  .venv/bin/ruff
-  ✓ ty                 0.0.3     via local-venv  .venv/bin/ty
-  ✓ pytest             8.3.0     via local-venv  .venv/bin/pytest
-
-Filesystem
-  ✓ .pulci/ writable   .pulci
-
-Daemon
-  ✓ running            not running (run `pulci start` to launch)
-
-State
-  ✓ state.json         not present (daemon never ran)
-
-All checks passed.
-```
-
-It catches typos in `pulci.toml` (like `clipy = true` inside `[hooks]`),
-missing tools, permission issues, and corrupted state files. Exits 0 when
-clean, 1 if anything's broken. Add `--json` for structured output.
-
-## For AI agents
-
-AI coding agents (Claude Code, Cursor, Codex) should start at **[docs/AGENTS.md](docs/AGENTS.md)**.
-
-The short version: run `pulci start` once, then call `pulci status --json` after each edit instead of invoking ruff/ty/pytest directly.
+AI coding agents: the full integration contract is in [docs/AGENTS.md](docs/AGENTS.md).
 
 ## Install
 
@@ -267,18 +200,68 @@ If `[tools]` is absent, pulci resolves each tool automatically: `.venv/bin/<tool
 
 pulci watches `.py` files only (`.rs` is included for internal Rust dogfooding, not a user-facing feature). Non-Python files are ignored without notice.
 
-## Benchmark
+## MCP server
 
-A benchmark script is included to compare pulci against manual tool invocation
-and prek across N iterations:
+pulci ships an MCP server for Claude Desktop, Cursor, and any MCP-compatible host.
+
+**Auto-install** (recommended) — writes the entry into the host's config file directly, preserving any other MCP servers you have:
 
 ```bash
-uv run python benchmarks/bench_modes.py --iterations 50
+pulci mcp install claude-desktop      # ~/Library/Application Support/Claude/...
+pulci mcp install cursor              # .cursor/mcp.json (project-local)
+pulci mcp install cursor --global     # ~/.cursor/mcp.json (all projects)
+pulci mcp install cursor --dry-run    # preview without writing
 ```
 
-Metrics: mean/p50/p95 latency per iteration, total wall time, estimated output
-tokens per iteration. pulci's compact `state.json` is a fixed-schema file;
-manual tool output grows linearly with the number of violations.
+For Claude Code, use its native `claude mcp add pulci $(which pulci) mcp` instead.
+
+**Manual setup** — `pulci mcp info` prints the JSON block you can paste yourself:
+
+```json
+{
+  "mcpServers": {
+    "pulci": {
+      "command": "/path/to/.venv/bin/pulci",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Once configured, the host exposes the `pulci_status` tool — agents call it instead of
+invoking ruff/ty/pytest directly.
+
+## pulci doctor
+
+When something looks wrong, `pulci doctor` tells you which layer is broken
+without running the daemon:
+
+```bash
+$ pulci doctor
+Configuration
+  ✓ project root       /home/me/my-project
+  ✓ pulci.toml         valid; enabled hooks: ruff, ty, pytest
+
+Tool resolution
+  ✓ ruff               0.7.4     via local-venv  .venv/bin/ruff
+  ✓ ty                 0.0.3     via local-venv  .venv/bin/ty
+  ✓ pytest             8.3.0     via local-venv  .venv/bin/pytest
+
+Filesystem
+  ✓ .pulci/ writable   .pulci
+
+Daemon
+  ✓ running            not running (run `pulci start` to launch)
+
+State
+  ✓ state.json         not present (daemon never ran)
+
+All checks passed.
+```
+
+It catches typos in `pulci.toml` (like `clipy = true` inside `[hooks]`),
+missing tools, permission issues, and corrupted state files. Exits 0 when
+clean, 1 if anything's broken. Add `--json` for structured output.
 
 ## State file contract
 
@@ -305,11 +288,3 @@ useful for `since_version`-style polling.
 - Full schema: [`schemas/state.v1.schema.json`](schemas/state.v1.schema.json)
 - Config schema: [`schemas/pulci-toml.schema.json`](schemas/pulci-toml.schema.json)
 - Agent documentation: [`docs/AGENTS.md`](docs/AGENTS.md)
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## License
-
-[Apache-2.0](LICENSE)
