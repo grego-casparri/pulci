@@ -1,5 +1,7 @@
 # Changelog
 
+> Release notes for pulci — quality gates that run between edits, built for AI coding agents.
+
 All notable changes to pulci are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version scheme: [Semantic Versioning](https://semver.org/).
