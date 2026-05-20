@@ -32,6 +32,7 @@ benchmarks/results.json
 # Local-only files (AI agent instructions + planning docs)
 docs/plans/
 .claude/
+.superpowers/
 
 # Secrets / environment
 .env
