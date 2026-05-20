@@ -4,7 +4,7 @@ This document is for AI coding agents (Claude Code, Cursor, Codex,
 custom harnesses). If you're a human, the [README](../README.md)
 is what you want.
 
-> This document describes the pulci contract as of **v0.0.6** (schema_version 1).
+> This document describes the pulci contract at **schema_version 1**.
 
 ## MCP setup (recommended)
 
@@ -197,7 +197,7 @@ Match on the keys before reading `summary` or `diagnostics`.
 
 | Response shape (key fields)                                       | What it means                                              | Recommended action                                                            |
 |-------------------------------------------------------------------|------------------------------------------------------------|-------------------------------------------------------------------------------|
-| `{"status": "not_running", "hint": ...}`                          | No daemon (no heartbeat or heartbeat older than 120 s).    | Surface to the user; offer to run `pulci start <path>`.                       |
+| `{"status": "not_running", "hint": ..., "startup_error": ...}`    | No daemon, or daemon failed to start.                      | If `startup_error` is present, surface its message — the daemon failed to start and retrying will not help. Otherwise offer to run `pulci start <path>`. On recurring failures, recommend `pulci doctor` to diagnose the cause. |
 | `{"status": "running_no_checks_yet", "daemon_status": "alive"}`   | Daemon started; initial scan still in progress.            | Brief retry (~200 ms) before reading state. Almost always resolves in <2 s.   |
 | `{"status": "timeout", "hint": ...}`                              | `since_version` was not surpassed within `timeout_ms`.     | Re-call without `since_version` to see current state. If state looks healthy (heartbeat alive, no `tool_errors`) the daemon may have skipped the change as a no-op. |
 | `{"status": "error", "hint": ...}`                                | `state.json` is corrupted on disk.                         | Stop and restart the daemon. Surface to the user; don't retry blindly.        |
@@ -216,9 +216,9 @@ These codes are stable within the following version ranges:
 
 | Tool   | Supported range | Notes                          |
 |--------|-----------------|--------------------------------|
-| ruff   | 0.4.x – 0.11.x  | Code names stable across range |
+| ruff   | 0.4.x – 0.15.x  | Code names stable across range |
 | ty     | 0.0.1 – 0.0.x   | Pre-stable; treat as best-effort |
-| pytest | 7.x – 8.x       | Exit codes and output stable   |
+| pytest | 7.x – 9.x       | Exit codes and output stable   |
 
 If the resolved tool version falls outside these ranges, pulci continues to
 run but diagnostic codes may not match the documented values. Read the `tools`
@@ -295,47 +295,41 @@ pulci does not run on commit. That's prek/pre-commit territory.
 The user's `pulci.toml` defines which hooks are active. You can read it,
 but you should not modify it without the user's explicit instruction.
 
+## Self-diagnosis: pulci doctor
+
+When the daemon misbehaves or `pulci_status` keeps returning `not_running`, the agent should suggest `pulci doctor` to the user. It returns a JSON report (`pulci doctor --json`) of every layer: config validity, tool resolution, filesystem permissions, daemon heartbeat, and state-file integrity. It does not require the daemon to be running, so it works exactly when `pulci_status` cannot.
+
 ## Debug event tracing
 
-Activá esta flag solo cuando estés diagnosticando un bug de pipeline (eventos
-perdidos, debounce raro, cache filtering inesperado). En `pulci.toml`:
+Enable this flag only when diagnosing a pipeline bug (lost events, weird debounce, unexpected cache filtering). In `pulci.toml`:
 
 ```toml
 [debug]
 event_trace = true
 ```
 
-Reiniciá `pulci start`. Cada evento del pipeline se loguea como JSONL a
-`.pulci/events.log`. Lifecycle: el `events.log` previo se renombra a
-`events.log.1` al arrancar; soft cap de 100 MB con un
-`{stage:"meta",action:"log_truncated"}` final si lo alcanza.
+Restart `pulci start`. Each pipeline event is logged as JSONL to `.pulci/events.log`. Lifecycle: the previous `events.log` is renamed to `events.log.1` on startup; soft cap of 100 MB with a `{stage:"meta",action:"log_truncated"}` final record if it is reached.
 
-Stages y campos relevantes:
-- `watcher`: cada FileEvent que llega del watcher con `(path, kind, mtime_ns,
-  size, content_sha256)`. Útil para detectar pérdidas en notify.
-- `debounce`: `window_open` / `window_close` con `batch_id` y, en el close,
-  el array `files` del batch. Útil para detectar window splits.
-- `cache`: `decision` (`unseen` | `changed` | `filtered` | `missing`) con
-  `prev_mtime_ns` / `curr_mtime_ns`. El smoking gun de mtime resolution
-  issues es `decision == "filtered"` con `prev_mtime_ns == curr_mtime_ns`.
-- `state_write`: cada vez que se publica `state.json` con su `state_version`,
-  `files_in_snapshot`, y `tools_run`.
+Stages and relevant fields:
+- `watcher`: each FileEvent arriving from the watcher with `(path, kind, mtime_ns, size, content_sha256)`. Useful for detecting notify losses.
+- `debounce`: `window_open` / `window_close` with `batch_id` and, in the close, the `files` array of the batch. Useful for detecting window splits.
+- `cache`: `decision` (`unseen` | `changed` | `filtered` | `missing`) with `prev_mtime_ns` / `curr_mtime_ns`. The smoking gun for mtime resolution issues is `decision == "filtered"` with `prev_mtime_ns == curr_mtime_ns`.
+- `state_write`: each time `state.json` is published with its `state_version`, `files_in_snapshot`, and `tools_run`.
 
-Ejemplos de análisis con jq:
+Analysis examples with jq:
 
 ```bash
-# Eventos cross-stage de un path específico:
+# Cross-stage events for a specific path:
 jq -c 'select(.path == "src/foo.py")' .pulci/events.log
 
-# Smoking gun de mtime resolution (Q-17 hipótesis 1):
+# Smoking gun for mtime resolution (cache decision filtered with identical mtimes):
 jq -c 'select(.stage == "cache" and .decision == "filtered" and .prev_mtime_ns == .curr_mtime_ns)' .pulci/events.log
 
-# Qué archivos contenía cada batch del debounce:
+# Which files each debounce batch contained:
 jq -c 'select(.stage == "debounce" and .action == "window_close") | {batch_id, files}' .pulci/events.log
 
-# Resumen de eventos por etapa:
+# Per-stage event count:
 jq -r '.stage' .pulci/events.log | sort | uniq -c
 ```
 
-**Apagá la flag** cuando termines — un debug session larga puede generar
-miles de eventos. `pulci doctor` reporta size + event count cuando está activa.
+**Turn the flag off** when finished — a long debug session can generate thousands of events. `pulci doctor` reports size + event count when the flag is active.
